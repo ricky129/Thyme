@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+jar="${THYME_JAR:-${HOME}/.local/lib/thyme/thyme.jar}"
+if [ ! -r "$jar" ]; then
+    printf 'thyme: jar non trovato: %s\n' "$jar" >&2
+    printf 'Copia target/thyme.jar in ~/.local/lib/thyme/thyme.jar o imposta THYME_JAR.\n' >&2
+    exit 1
+fi
+
+exec java -jar "$jar" "$@"

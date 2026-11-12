@@ -1,0 +1,13 @@
+# SSH destination used by deploy.sh and by `thyme` when no target is given.
+deploy.user=myserver
+deploy.host=100.73.45.88
+
+# Optional. Defaults to ~/docker/thyme and port 22.
+deploy.remote_dir=~/docker/thyme
+# deploy.port=2222
+
+# Optional private key path. If omitted, OpenSSH uses ssh-agent and ~/.ssh/config.
+# deploy.key=~/.ssh/id_ed25519
+
+# Alternatively, omit deploy.host and set a URL here:
+# server.tailscale=http://100.73.45.88:7000
