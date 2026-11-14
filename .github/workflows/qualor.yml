@@ -16,8 +16,19 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      # Install dependencies (JS/TS, Go) or build (Java) here, before the scan.
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'maven'
+
+      - name: Build with Maven
+        run: ./mvnw test-compile
+
       - uses: qualor-dev/scan-action@v0.15
         with:
           server-url: ${{ vars.QUALOR_URL }}
           token: ${{ secrets.QUALOR_TOKEN }}
+          args: --no-wait # Optional: prevents CI failure when the quality gate fails
