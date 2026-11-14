@@ -1,11 +1,34 @@
 #!/bin/sh
 set -eu
+export LC_ALL=C
 
-jar="${THYME_JAR:-${HOME}/.local/lib/thyme/thyme.jar}"
-if [ ! -r "$jar" ]; then
-    printf 'thyme: jar non trovato: %s\n' "$jar" >&2
-    printf 'Copia target/thyme.jar in ~/.local/lib/thyme/thyme.jar o imposta THYME_JAR.\n' >&2
+client="${THYME_CLIENT_JAR:-${HOME}/.local/lib/thyme/thyme-client.jar}"
+if [ ! -r "$client" ]; then
+    printf 'thyme: client not found: %s\n' "$client" >&2
+    printf 'Run deploy.sh or set THYME_CLIENT_JAR.\n' >&2
     exit 1
 fi
 
-exec java -jar "$jar" "$@"
+if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+    java="$JAVA_HOME/bin/java"
+elif command -v java >/dev/null 2>&1; then
+    java=$(command -v java)
+else
+    printf 'thyme: Java 25 or later is required on the client computer.\n' >&2
+    exit 1
+fi
+
+java_version=$("$java" -XshowSettings:properties -version 2>&1 |
+    sed -n 's/^[[:space:]]*java.specification.version = //p' | head -n 1)
+case "$java_version" in
+    ''|*[!0-9]*)
+        printf 'thyme: cannot determine the current Java version.\n' >&2
+        exit 1
+        ;;
+esac
+if [ "$java_version" -lt 25 ]; then
+    printf 'thyme: Java 25 or later is required on the client computer (found Java %s).\n' "$java_version" >&2
+    exit 1
+fi
+
+exec "$java" --module-path "$client" --module com.ricky.thyme.client/com.ricky.thyme.Main "$@"
