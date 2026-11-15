@@ -2,18 +2,19 @@ package com.ricky.thyme.feature.telemetry;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.DoubleSupplier;
 
 /**
- * One monotonic one-second clock shared by metric series.
- * Every registered buffer receives exactly one tick per clock invocation;
+ * One monotonic one-second clock shared by metric series. Every registered buffer receives exactly one tick per clock invocation;
+ *
  * between a series' configured provider cadences it receives NaN.
  */
 public final class MetricScheduler implements AutoCloseable {
+
     private static final long TICK_NANOS = Duration.ofSeconds(1).toNanos();
     private final ScheduledExecutorService executor;
     private final ArrayList<Series> series = new ArrayList<>();
@@ -28,7 +29,7 @@ public final class MetricScheduler implements AutoCloseable {
         });
     }
 
-    /** Registers a series. Cadence must be a positive whole number of seconds. */
+    // Registers a series. Cadence must be a positive whole number of seconds.
     public synchronized void register(TimeSeriesBuffer buffer, Duration cadence, DoubleSupplier provider) {
         long seconds = cadence.toSeconds();
         if (seconds <= 0 || cadence.toNanos() != seconds * TICK_NANOS) {
@@ -37,12 +38,27 @@ public final class MetricScheduler implements AutoCloseable {
         series.add(new Series(buffer, seconds, provider));
     }
 
-    /** Starts the shared clock once; the first tick occurs after one second. */
-    public synchronized void start() {
-        if (task == null) task = executor.scheduleAtFixedRate(this::tick, 1, 1, TimeUnit.SECONDS);
+    // Removes page-specific registrations before the page is shown again.
+    public synchronized void clear() {
+        series.clear();
+        tick = 0;
     }
 
-    /** Performs one tick synchronously; useful for deterministic tests and manual clocks. */
+    // Starts the shared clock once; the first tick occurs after one second.
+    public synchronized void start() {
+        if (task == null)
+            task = executor.scheduleAtFixedRate(this::tick, 1, 1, TimeUnit.SECONDS);
+    }
+
+    // Stops delivery without destroying the scheduler; it may be started again on page show.
+    public synchronized void stop() {
+        if (task != null) {
+            task.cancel(false);
+            task = null;
+        }
+    }
+
+    // Performs one tick synchronously; useful for deterministic tests and manual clocks.
     public synchronized void tickNow() {
         tick();
     }
@@ -57,10 +73,13 @@ public final class MetricScheduler implements AutoCloseable {
         }
     }
 
-    @Override public synchronized void close() {
-        if (task != null) task.cancel(false);
+    @Override
+    public synchronized void close() {
+        stop();
         executor.shutdownNow();
     }
 
-    private record Series(TimeSeriesBuffer buffer, long cadenceSeconds, DoubleSupplier provider) {}
+    private record Series(TimeSeriesBuffer buffer, long cadenceSeconds, DoubleSupplier provider) {
+
+    }
 }

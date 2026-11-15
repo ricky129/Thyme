@@ -17,12 +17,17 @@ import com.ricky.thyme.feature.memory.MemorySnapshot;
 import com.ricky.thyme.feature.memory.OshiMemoryProvider;
 import com.ricky.thyme.feature.services.ServiceProvider;
 import com.ricky.thyme.feature.services.ServiceSnapshot;
+import com.ricky.thyme.feature.telemetry.EventLogBuffer;
+import com.ricky.thyme.feature.telemetry.EventTransitionTracker;
+import com.ricky.thyme.feature.telemetry.MetricScheduler;
+import com.ricky.thyme.feature.telemetry.TimeSeriesBuffer;
 import com.ricky.thyme.ui.Page;
 import java.io.IOException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +39,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class DashboardPage extends Page {
+
     private static final TextColor BACKGROUND = rgb(10, 14, 20);
     private static final TextColor PANEL = rgb(17, 24, 34);
     private static final TextColor BORDER = rgb(44, 57, 72);
@@ -57,9 +63,12 @@ public final class DashboardPage extends Page {
     private final DiskProvider diskProvider;
     private final ServiceProvider serviceProvider;
     private final AtomicReference<DashboardSnapshot> snapshot = new AtomicReference<>();
-    private final AtomicReference<List<Double>> cpuHistory = new AtomicReference<>(List.of());
-    private final AtomicReference<List<Double>> memoryHistory = new AtomicReference<>(List.of());
-    private final AtomicReference<Map<String, List<Double>>> filesystemHistory = new AtomicReference<>(Map.of());
+    private final TimeSeriesBuffer cpuHistory = new TimeSeriesBuffer();
+    private final TimeSeriesBuffer memoryHistory = new TimeSeriesBuffer();
+    private final Map<String, TimeSeriesBuffer> filesystemHistory = new HashMap<>();
+    private final MetricScheduler scheduler = new MetricScheduler();
+    private final EventLogBuffer eventLog = new EventLogBuffer();
+    private final EventTransitionTracker transitions = new EventTransitionTracker(eventLog);
     private final AtomicBoolean loading = new AtomicBoolean();
     private final AtomicInteger selectedService = new AtomicInteger();
     private final AtomicLong generation = new AtomicLong();
@@ -97,135 +106,196 @@ public final class DashboardPage extends Page {
     public void onShow(Executor background) {
         this.background = background;
         generation.incrementAndGet();
+        scheduler.clear();
+        scheduler.register(new TimeSeriesBuffer(), Duration.ofSeconds(1), () -> {
+            sample();
+            return Double.NaN;
+        });
+        scheduler.register(new TimeSeriesBuffer(), Duration.ofSeconds(5), () -> {
+            sampleGpu();
+            return Double.NaN;
+        });
+        scheduler.register(new TimeSeriesBuffer(), Duration.ofSeconds(5), () -> {
+            sampleServices();
+            return Double.NaN;
+        });
+        scheduler.start();
         refresh();
     }
 
     @Override
     public void onHide() {
         generation.incrementAndGet();
+        scheduler.stop();
         background = null;
     }
 
     @Override
     public void handleKey(KeyStroke key) {
-        if (key.getKeyType() == KeyType.ArrowDown)
+        if (key.getKeyType() == KeyType.ArrowDown) {
             selectedService.updateAndGet(value -> Math.min(value + 1, Math.max(0, serviceCount() - 1)));
-        else if (key.getKeyType() == KeyType.ArrowUp)
+        } else if (key.getKeyType() == KeyType.ArrowUp) {
             selectedService.updateAndGet(value -> Math.max(0, value - 1));
-        else if (key.getKeyType() == KeyType.Character && key.getCharacter() != null) {
-            if (Character.toLowerCase(key.getCharacter()) == 'r')
+        } else if (key.getKeyType() == KeyType.Character && key.getCharacter() != null) {
+            if (Character.toLowerCase(key.getCharacter()) == 'r') {
                 refresh();
+            }
         }
     }
 
     @Override
     public void refresh() {
         Executor executor = background;
-        if (executor == null || !loading.compareAndSet(false, true))
+        if (executor == null || !loading.compareAndSet(false, true)) {
             return;
-        long requestGeneration = generation.get();
+        }
         try {
-            executor.execute(() -> sample(requestGeneration));
+            executor.execute(() -> {
+                try {
+                    sample();
+                    sampleGpu();
+                    sampleServices();
+                } finally {
+                    loading.set(false);
+                }
+            });
         } catch (RejectedExecutionException e) {
             loading.set(false);
             pageError.set("Refresh not started: " + message(e));
         }
     }
 
-    private void sample(long requestGeneration) {
+    private void sample() {
+        CpuSnapshot cpu = null;
+        MemorySnapshot memory = null;
+        DiskSnapshot disk = null;
+        Map<String, String> errors = new LinkedHashMap<>();
         try {
-            CpuSnapshot cpu = null;
-            MemorySnapshot memory = null;
-            GpuReading gpu = null;
-            DiskSnapshot disk = null;
-            List<ServiceSnapshot> services = List.of();
-            Map<String, String> errors = new LinkedHashMap<>();
-            try {
-                cpu = cpuProvider.read();
-            } catch (RuntimeException e) {
-                errors.put("CPU", message(e));
-            }
-            try {
-                memory = memoryProvider.read();
-            } catch (RuntimeException e) {
-                errors.put("RAM", message(e));
-            }
-            try {
-                gpu = gpuProvider.read();
-                if (!gpu.errors().isEmpty())
-                    errors.put("GPU", String.join("; ", gpu.errors()));
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                errors.put("GPU", "Read interrupted");
-            } catch (RuntimeException e) {
-                errors.put("GPU", message(e));
-            }
-            try {
-                disk = diskProvider.read();
-            } catch (IOException | RuntimeException e) {
-                errors.put("Disks", message(e));
-            }
-            try {
-                services = serviceProvider.list();
-                serviceMessage.set(services.size() + " services loaded.");
-                selectedService.set(Math.max(0, Math.min(selectedService.get(), services.size() - 1)));
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                errors.put("Services", "Read interrupted");
-                serviceMessage.set("Service read interrupted.");
-            } catch (IOException | RuntimeException e) {
-                errors.put("Services", message(e));
-                serviceMessage.set("Error: " + message(e));
-            }
-            if (requestGeneration == generation.get()) {
-                snapshot.set(new DashboardSnapshot(Instant.now(), cpu, memory, gpu, disk, services, errors));
-                if (cpu != null)
-                    appendHistory(cpuHistory, cpu.totalUsagePercent());
-                if (memory != null)
-                    appendHistory(memoryHistory, ratio(memory.usedBytes(), memory.totalBytes()));
-                if (disk != null) {
-                    for (DiskSnapshot.Filesystem filesystem : disk.filesystems()) {
-                        if (filesystem.utilizationPercent() != null)
-                            appendFilesystemHistory(filesystem.mountPoint(), filesystem.utilizationPercent());
-                    }
-                }
-                pageError.set(null);
-            }
+            cpu = cpuProvider.read();
         } catch (RuntimeException e) {
-            if (requestGeneration == generation.get())
-                pageError.set("Metrics collection failed: " + message(e));
-        } finally {
-            loading.set(false);
+            errors.put("CPU", message(e));
+            recordProviderError("CPU", message(e));
         }
+        try {
+            memory = memoryProvider.read();
+        } catch (RuntimeException e) {
+            errors.put("RAM", message(e));
+            recordProviderError("RAM", message(e));
+        }
+        try {
+            disk = diskProvider.read();
+        } catch (IOException | RuntimeException e) {
+            errors.put("Disks", message(e));
+            recordProviderError("Disks", message(e));
+        }
+        Double cpuUsage = cpu == null ? null : cpu.totalUsagePercent();
+        cpuHistory.append(cpuUsage == null ? Double.NaN : cpuUsage);
+        memoryHistory.append(memory == null
+                ? Double.NaN
+                : ratio(memory.usedBytes(), memory.totalBytes()));
+        if (disk != null) {
+            for (DiskSnapshot.Filesystem fs : disk.filesystems()) {
+                Double utilization = fs.utilizationPercent();
+
+                filesystemBuffer(fs.mountPoint())
+                        .append(utilization == null ? Double.NaN : utilization);
+
+                filesystemEvent(fs);
+            }
+        }
+        updateSnapshot(cpu, memory, null, disk, null, errors);
+    }
+
+    private void sampleGpu() {
+        try {
+            GpuReading gpu = gpuProvider.read();
+            Map<String, String> errors = new LinkedHashMap<>();
+            if (!gpu.errors().isEmpty()) {
+                errors.put("GPU", String.join("; ", gpu.errors()));
+                recordProviderError("GPU", errors.get("GPU"));
+            }
+            updateSnapshot(null, null, gpu, null, null, errors);
+            for (GpuSnapshot device : gpu.devices()) {
+                thresholdEvent("temperature:" + device.name(), device.temperatureCelsius(), 80, 90, "GPU temperature");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            recordProviderError("GPU", "Read interrupted");
+        } catch (RuntimeException e) {
+            recordProviderError("GPU", message(e));
+        }
+    }
+
+    private void sampleServices() {
+        try {
+            List<ServiceSnapshot> services = serviceProvider.list();
+            serviceMessage.set(services.size() + " services loaded.");
+            selectedService.set(Math.max(0, Math.min(selectedService.get(), services.size() - 1)));
+            for (ServiceSnapshot service : services) {
+                transition("service:" + service.unit(), service.active().equalsIgnoreCase("failed") ? "failed" : "ok",
+                        "Service " + service.unit() + " failed", EventLogBuffer.Severity.CRITICAL);
+            }
+            updateSnapshot(null, null, null, null, services, Map.of());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            recordProviderError("Services", "Read interrupted");
+        } catch (IOException | RuntimeException e) {
+            recordProviderError("Services", message(e));
+            serviceMessage.set("Error: " + message(e));
+        }
+    }
+
+    private void updateSnapshot(CpuSnapshot cpu, MemorySnapshot memory, GpuReading gpu,
+            DiskSnapshot disk, List<ServiceSnapshot> services, Map<String, String> errors) {
+        DashboardSnapshot old = snapshot.get();
+        snapshot.set(new DashboardSnapshot(Instant.now(), cpu != null ? cpu : old == null ? null : old.cpu(),
+                memory != null ? memory : old == null ? null : old.memory(), gpu != null ? gpu : old == null ? null : old.gpu(),
+                disk != null ? disk : old == null ? null : old.disk(), services != null ? services : old == null ? List.of() : old.services(),
+                errors.isEmpty() && old != null ? old.errors() : errors));
+        pageError.set(errors.isEmpty() ? null : errors.values().iterator().next());
+    }
+
+    private TimeSeriesBuffer filesystemBuffer(String mount) {
+        synchronized (filesystemHistory) {
+            return filesystemHistory.computeIfAbsent(mount, ignored -> new TimeSeriesBuffer());
+        }
+    }
+
+    public EventLogBuffer eventLog() {
+        return eventLog;
+    }
+
+    @Override
+    public void close() {
+        scheduler.close();
+    }
+
+    private void filesystemEvent(DiskSnapshot.Filesystem filesystem) {
+        Double value = filesystem.utilizationPercent();
+        String state = value == null ? "unknown" : value >= 95 ? "critical" : value >= 85 ? "warning" : "ok";
+        transition("filesystem:" + filesystem.mountPoint(), state,
+                "Filesystem " + filesystem.mountPoint() + " above threshold (" + state + ")",
+                state.equals("critical") ? EventLogBuffer.Severity.CRITICAL : EventLogBuffer.Severity.WARM);
+    }
+
+    private void thresholdEvent(String key, Double value, double warning, double critical, String label) {
+        String state = value == null ? "unknown" : value >= critical ? "critical" : value >= warning ? "warning" : "ok";
+        transition(key, state, label + " above threshold (" + state + ")",
+                state.equals("critical") ? EventLogBuffer.Severity.CRITICAL : EventLogBuffer.Severity.WARM);
+    }
+
+    private void recordProviderError(String provider, String detail) {
+        transition("provider:" + provider, "error", provider + " provider error: " + detail,
+                EventLogBuffer.Severity.CRITICAL);
+    }
+
+    private void transition(String key, String state, String message, EventLogBuffer.Severity severity) {
+        transitions.transition(key, state, severity, message);
     }
 
     private int serviceCount() {
         DashboardSnapshot current = snapshot.get();
         return current == null ? 0 : current.services().size();
-    }
-
-    private static void appendHistory(AtomicReference<List<Double>> history, Double value) {
-        if (value == null)
-            return;
-        history.updateAndGet(previous -> {
-            List<Double> next = new ArrayList<>(previous);
-            next.add(value);
-            if (next.size() > 60)
-                next.removeFirst();
-            return List.copyOf(next);
-        });
-    }
-
-    private void appendFilesystemHistory(String mountPoint, Double value) {
-        filesystemHistory.updateAndGet(previous -> {
-            Map<String, List<Double>> next = new LinkedHashMap<>(previous);
-            List<Double> values = new ArrayList<>(next.getOrDefault(mountPoint, List.of()));
-            values.add(value);
-            if (values.size() > 60)
-                values.removeFirst();
-            next.put(mountPoint, List.copyOf(values));
-            return Map.copyOf(next);
-        });
     }
 
     @Override
@@ -262,11 +332,11 @@ public final class DashboardPage extends Page {
         drawPanel(graphics, 0, bottomY, leftWidth, bottomHeight, "GRAPHICS", PURPLE);
         drawPanel(graphics, rightX, bottomY, rightWidth, bottomHeight, "SERVICES", GREEN);
 
-        if (pageError.get() != null)
+        if (pageError.get() != null) {
             put(graphics, 2, 3, width - 4, "ERROR  " + pageError.get(), RED);
-        else if (current == null)
+        } else if (current == null) {
             put(graphics, 2, 3, width - 4, "Connecting to system metrics...", MUTED);
-        else {
+        } else {
             drawCpu(graphics, current, 0, contentTop, leftWidth, topHeight);
             drawMemory(graphics, current, rightX, contentTop, rightWidth, topHeight);
             drawStorage(graphics, current, 0, storageY, width, storageHeight);
@@ -282,8 +352,9 @@ public final class DashboardPage extends Page {
                 snapshot.get() == null ? "LIVE  •  --:--:--" : "LIVE  •  " + CLOCK.format(snapshot.get().sampledAt()),
                 MUTED);
         graphics.setForegroundColor(BORDER);
-        if (width > 0)
+        if (width > 0) {
             graphics.drawLine(0, 1, width - 1, 1, '─');
+        }
     }
 
     private void drawFooter(TextGraphics graphics, int width, int height) {
@@ -296,8 +367,9 @@ public final class DashboardPage extends Page {
 
     private static void drawPanel(
             TextGraphics graphics, int x, int y, int width, int height, String title, TextColor accent) {
-        if (width < 4 || height < 3)
+        if (width < 4 || height < 3) {
             return;
+        }
         graphics.setBackgroundColor(PANEL);
         graphics.fillRectangle(new TerminalPosition(x, y), new TerminalSize(width, height), ' ');
         graphics.setForegroundColor(BORDER);
@@ -320,30 +392,35 @@ public final class DashboardPage extends Page {
             return;
         }
         int bottom = y + height - 1;
-        if (row >= bottom)
+        if (row >= bottom) {
             return;
+        }
         put(graphics, x + 2, row, width - 4, shorten(cpu.model(), width - 5), TEXT);
         row++;
-        if (row < bottom)
-            row = gauge(graphics, x + 2, row, width - 4, "TOTAL", cpu.totalUsagePercent(), TEAL);
         if (row < bottom) {
-            put(graphics, x + 2, row, width - 4, "60s " + sparkline(cpuHistory.get(), width - 9), TEAL);
+            row = gauge(graphics, x + 2, row, width - 4, "TOTAL", cpu.totalUsagePercent(), TEAL);
+        }
+        if (row < bottom) {
+            put(graphics, x + 2, row, width - 4,
+                    "15m " + sparkline(cpuHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), width - 18)
+                    + age(cpuHistory), TEAL);
             row++;
         }
         if (row < bottom) {
             put(graphics, x + 2, row, width - 4,
-                "Temp " + temperature(cpu.temperatureCelsius()) + "   Load "
-                        + decimal(cpu.loadAverage1()) + "  " + decimal(cpu.loadAverage5()) + "  "
-                        + decimal(cpu.loadAverage15()) + "   " + cpu.logicalProcessors() + " threads",
-                MUTED);
+                    "Temp " + temperature(cpu.temperatureCelsius()) + "   Load "
+                    + decimal(cpu.loadAverage1()) + "  " + decimal(cpu.loadAverage5()) + "  "
+                    + decimal(cpu.loadAverage15()) + "   " + cpu.logicalProcessors() + " threads",
+                    MUTED);
             row++;
         }
         int coresPerLine = Math.max(1, (width - 5) / 12);
         for (int index = 0; index < cpu.cores().size() && row < bottom; index += coresPerLine) {
             StringBuilder line = new StringBuilder();
             for (int core = index; core < Math.min(index + coresPerLine, cpu.cores().size()); core++) {
-                if (!line.isEmpty())
+                if (!line.isEmpty()) {
                     line.append("  ");
+                }
                 CpuSnapshot.Core value = cpu.cores().get(core);
                 line.append("C").append(value.index()).append(' ')
                         .append(percent(value.usagePercent())).append(' ')
@@ -371,7 +448,9 @@ public final class DashboardPage extends Page {
             row++;
         }
         if (row < y + height - 1) {
-            put(graphics, x + 2, row, width - 4, "60s " + sparkline(memoryHistory.get(), width - 9), BLUE);
+            put(graphics, x + 2, row, width - 4,
+                    "15m " + sparkline(memoryHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), width - 18)
+                    + age(memoryHistory), BLUE);
             row++;
         }
         if (row < y + height - 1) {
@@ -388,38 +467,42 @@ public final class DashboardPage extends Page {
         GpuReading gpu = current.gpu();
         if (gpu == null || gpu.devices().isEmpty()) {
             put(graphics, x + 2, y + 1, width - 4, "No graphics device detected", MUTED);
-            if (gpu != null && !gpu.errors().isEmpty())
+            if (gpu != null && !gpu.errors().isEmpty()) {
                 put(graphics, x + 2, y + 2, width - 4, shorten(String.join("; ", gpu.errors()), width - 5), ORANGE);
+            }
             return;
         }
         int row = y + 1;
         for (GpuSnapshot device : gpu.devices()) {
-            if (row >= y + height - 1)
+            if (row >= y + height - 1) {
                 break;
+            }
             put(graphics, x + 2, row, width - 4,
                     shorten(device.vendor() + "  " + device.name(), width - 5), TEXT);
             row++;
-            if (row < y + height - 1)
+            if (row < y + height - 1) {
                 row = gauge(graphics, x + 2, row, width - 4, "GPU", device.utilizationPercent(), PURPLE);
+            }
             if (row < y + height - 1) {
                 put(graphics, x + 2, row, width - 4,
                         "VRAM " + memory(device.memoryUsedBytes()) + " / " + memory(device.memoryTotalBytes())
-                                + "   " + temperature(device.temperatureCelsius()),
+                        + "   " + temperature(device.temperatureCelsius()),
                         MUTED);
                 row++;
             }
             if (row < y + height - 1) {
                 put(graphics, x + 2, row, width - 4,
                         "P " + watts(device.powerWatts()) + "/" + watts(device.powerLimitWatts())
-                                + "   C " + mhz(device.graphicsClockMhz())
-                                + "   M " + mhz(device.memoryClockMhz()),
+                        + "   C " + mhz(device.graphicsClockMhz())
+                        + "   M " + mhz(device.memoryClockMhz()),
                         MUTED);
                 row++;
             }
         }
         String error = current.errors().get("GPU");
-        if (error != null && row < y + height - 1)
+        if (error != null && row < y + height - 1) {
             put(graphics, x + 2, row, width - 4, "Partial metrics: " + error, ORANGE);
+        }
     }
 
     private void drawStorage(TextGraphics graphics, DashboardSnapshot current, int x, int y, int width, int height) {
@@ -436,8 +519,9 @@ public final class DashboardPage extends Page {
         int row = y + 1;
         int maxRows = y + height - 1;
         for (DiskSnapshot.Filesystem filesystem : disk.filesystems()) {
-            if (row + 1 >= maxRows)
+            if (row + 1 >= maxRows) {
                 break;
+            }
             double usedPercent = ratio(filesystem.usedBytes(), filesystem.totalBytes());
             String mount = shorten(filesystem.mountPoint(), Math.max(12, width / 4));
             String space = gib(filesystem.usedBytes()) + " / " + gib(filesystem.totalBytes()) + " GiB ("
@@ -453,7 +537,12 @@ public final class DashboardPage extends Page {
             int graphWidth = width / 3;
             int ioWidth = width - graphWidth - 8;
             put(graphics, x + 2, row + 1, ioWidth, io, rowColor(filesystem.utilizationPercent()));
-            List<Double> history = filesystemHistory.get().getOrDefault(filesystem.mountPoint(), List.of());
+            double[] history;
+            synchronized (filesystemHistory) {
+                TimeSeriesBuffer buffer = filesystemHistory.get(filesystem.mountPoint());
+                history = buffer == null ? new double[0]
+                        : buffer.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
+            }
             put(graphics, x + 4 + ioWidth, row + 1, graphWidth,
                     sparkline(history, graphWidth), ORANGE);
             row += 2;
@@ -479,8 +568,9 @@ public final class DashboardPage extends Page {
                     + "  " + service.active() + "/" + service.sub();
             put(graphics, x + 2, y + 1 + row, width - 4, line, selected ? TEAL : serviceColor(service));
         }
-        if (height > 3)
+        if (height > 3) {
             put(graphics, x + 2, y + height - 2, width - 4, serviceMessage.get(), MUTED);
+        }
     }
 
     private static int gauge(
@@ -501,8 +591,9 @@ public final class DashboardPage extends Page {
     }
 
     private static TextColor rowColor(Double utilization) {
-        if (utilization == null)
+        if (utilization == null) {
             return MUTED;
+        }
         return utilization >= 85 ? RED : utilization >= 65 ? ORANGE : TEXT;
     }
 
@@ -516,14 +607,16 @@ public final class DashboardPage extends Page {
 
     private static void put(
             TextGraphics graphics, int x, int y, int width, String text, TextColor color, boolean bold) {
-        if (width <= 0 || text == null)
+        if (width <= 0 || text == null) {
             return;
+        }
         String clipped = text.substring(0, Math.min(text.length(), width));
         graphics.setForegroundColor(color);
-        if (bold)
+        if (bold) {
             graphics.putString(x, y, clipped, com.googlecode.lanterna.SGR.BOLD);
-        else
+        } else {
             graphics.putString(x, y, clipped);
+        }
     }
 
     private static String message(Exception exception) {
@@ -531,13 +624,14 @@ public final class DashboardPage extends Page {
     }
 
     private static String shorten(String value, int maxLength) {
-        if (value.length() <= maxLength)
+        if (value.length() <= maxLength) {
             return value;
+        }
         return maxLength <= 1 ? value.substring(0, maxLength) : value.substring(0, maxLength - 1) + "…";
     }
 
-    private static Double ratio(long used, long total) {
-        return total == 0 ? 0.0 : Math.min(100, used * 100.0 / total);
+    private static double ratio(long used, long total) {
+        return total == 0 ? 0.0 : Math.min(100.0, used * 100.0 / total);
     }
 
     private static String percent(Double value) {
@@ -576,20 +670,34 @@ public final class DashboardPage extends Page {
         return value == null ? "--" : String.format("%.1f", value);
     }
 
+    private static String age(TimeSeriesBuffer buffer) {
+        Duration age = buffer.latestAge();
+        if (age == null || age.compareTo(Duration.ofSeconds(2)) <= 0) {
+            return "";
+        }
+        return "  age " + Math.max(1, age.toSeconds()) + "s";
+    }
+
     private static String rate(Double bytesPerSecond) {
-        if (bytesPerSecond == null)
+        if (bytesPerSecond == null) {
             return "--";
+        }
         double mib = bytesPerSecond / (1024.0 * 1024);
         return mib >= 100 ? String.format("%.0fM/s", mib) : String.format("%.1fM/s", mib);
     }
 
-    private static String sparkline(List<Double> values, int width) {
-        if (values.isEmpty() || width <= 0)
+    private static String sparkline(double[] values, int width) {
+        if (values.length == 0 || width <= 0) {
             return "waiting for samples";
-        int start = Math.max(0, values.size() - width);
-        StringBuilder line = new StringBuilder(values.size() - start);
-        for (int index = start; index < values.size(); index++) {
-            double value = Math.max(0, Math.min(100, values.get(index)));
+        }
+        int start = Math.max(0, values.length - width);
+        StringBuilder line = new StringBuilder(values.length - start);
+        for (int index = start; index < values.length; index++) {
+            if (Double.isNaN(values[index])) {
+                line.append(' ');
+                continue;
+            }
+            double value = Math.max(0, Math.min(100, values[index]));
             line.append(SPARKLINE[(int) Math.round(value / 100 * (SPARKLINE.length - 1))]);
         }
         return line.toString();

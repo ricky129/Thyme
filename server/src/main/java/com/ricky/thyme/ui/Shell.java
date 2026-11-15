@@ -8,8 +8,10 @@ import com.googlecode.lanterna.screen.TerminalScreen;
 import com.googlecode.lanterna.terminal.DefaultTerminalFactory;
 import java.io.IOException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.locks.LockSupport;
 
 public final class Shell {
+
     private final Page dashboard;
     private final Page containers;
     private Page page;
@@ -19,20 +21,19 @@ public final class Shell {
     }
 
     public Shell(Page dashboard, Page containers) {
-        if (dashboard == null)
+        if (dashboard == null) {
             throw new IllegalArgumentException("the shell requires a page");
+        }
         this.dashboard = dashboard;
         this.containers = containers;
         this.page = dashboard;
     }
 
     public void run() throws IOException {
-        try (var background = Executors.newVirtualThreadPerTaskExecutor();
-                Screen screen = new TerminalScreen(new DefaultTerminalFactory().createTerminal())) {
+        try (var background = Executors.newVirtualThreadPerTaskExecutor(); Screen screen = new TerminalScreen(new DefaultTerminalFactory().createTerminal())) {
             screen.startScreen();
             screen.setCursorPosition(null);
             page.onShow(background);
-            long nextRefresh = 0;
             long nextRender = 0;
             boolean running = true;
             try {
@@ -52,27 +53,30 @@ public final class Shell {
                                 && key.getCharacter() != null
                                 && (key.getCharacter() == 'd' || key.getCharacter() == 'D'))
                             switchPage(background);
-                        else
+                        else {
                             page.handleKey(key);
+                        }
                     }
 
                     long now = System.nanoTime();
-                    if (now >= nextRefresh) {
-                        page.refresh();
-                        nextRefresh = now + 1_000_000_000L;
-                    }
                     if (now >= nextRender) {
                         TerminalSize terminalSize = currentTerminalSize(screen);
                         page.render(screen.newTextGraphics(), terminalSize);
                         screen.refresh();
                         nextRender = now + 100_000_000L;
                     }
-                    Thread.sleep(30);
+                    LockSupport.parkNanos(30_000_000L);
+
+                    if (Thread.currentThread().isInterrupted())
+                        running = false;
                 }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
             } finally {
                 page.onHide();
+                page.close();
+                if (dashboard != page)
+                    dashboard.close();
+                if (containers != null && containers != page)
+                    containers.close();
                 screen.stopScreen();
             }
         }
