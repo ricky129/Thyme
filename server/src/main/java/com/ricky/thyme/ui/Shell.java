@@ -32,7 +32,6 @@ public final class Shell {
             screen.startScreen();
             screen.setCursorPosition(null);
             page.onShow(background);
-            long nextRefresh = 0;
             long nextRender = 0;
             boolean running = true;
             try {
@@ -57,10 +56,6 @@ public final class Shell {
                     }
 
                     long now = System.nanoTime();
-                    if (now >= nextRefresh) {
-                        page.refresh();
-                        nextRefresh = now + 1_000_000_000L;
-                    }
                     if (now >= nextRender) {
                         TerminalSize terminalSize = currentTerminalSize(screen);
                         page.render(screen.newTextGraphics(), terminalSize);
@@ -73,6 +68,11 @@ public final class Shell {
                 Thread.currentThread().interrupt();
             } finally {
                 page.onHide();
+                page.close();
+                if (dashboard != page)
+                    dashboard.close();
+                if (containers != null && containers != page)
+                    containers.close();
                 screen.stopScreen();
             }
         }

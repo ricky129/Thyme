@@ -6,9 +6,16 @@ import com.googlecode.lanterna.graphics.TextGraphics;
 import com.googlecode.lanterna.input.KeyStroke;
 import com.googlecode.lanterna.input.KeyType;
 import com.ricky.thyme.ui.Page;
+import com.ricky.thyme.feature.telemetry.EventLogBuffer;
+import com.ricky.thyme.feature.telemetry.MetricScheduler;
+import com.ricky.thyme.feature.telemetry.TimeSeriesBuffer;
+import java.time.Duration;
+import java.time.Instant;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -27,6 +34,8 @@ public final class ContainerPage extends Page {
     private static final TextColor RED = rgb(255, 111, 125);
 
     private final ContainerProvider provider;
+    private final MetricScheduler scheduler = new MetricScheduler();
+    private final EventLogBuffer eventLog = new EventLogBuffer();
     private final AtomicReference<List<ContainerSnapshot>> containers = new AtomicReference<>(List.of());
     private final AtomicReference<String> error = new AtomicReference<>();
     private final AtomicReference<String> logs = new AtomicReference<>();
@@ -56,13 +65,25 @@ public final class ContainerPage extends Page {
     @Override
     public void onShow(Executor background) {
         this.background.set(background);
+        scheduler.clear();
+        scheduler.register(new TimeSeriesBuffer(), Duration.ofSeconds(5), () -> {
+            refresh();
+            return Double.NaN;
+        });
+        scheduler.start();
         refresh();
     }
 
     @Override
     public void onHide() {
+        scheduler.stop();
         background.set(null);
     }
+
+    public EventLogBuffer eventLog() { return eventLog; }
+
+    @Override
+    public void close() { scheduler.close(); }
 
     @Override
     public void handleKey(KeyStroke key) {
@@ -134,7 +155,21 @@ public final class ContainerPage extends Page {
         try {
             executor.execute(() -> {
                 try {
-                    containers.set(provider.list());
+                    List<ContainerSnapshot> next = provider.list();
+                    Map<String, ContainerSnapshot> previous = new HashMap<>();
+                    for (ContainerSnapshot item : containers.get()) previous.put(item.id(), item);
+                    for (ContainerSnapshot item : next) {
+                        ContainerSnapshot old = previous.get(item.id());
+                        String state = item.state().toLowerCase();
+                        if (old != null && !old.state().equalsIgnoreCase(item.state())
+                                && (state.equals("exited") || state.equals("stopped")))
+                            eventLog.add(new EventLogBuffer.Event(Instant.now(), EventLogBuffer.Severity.WARM,
+                                    "Container " + item.name() + " stopped"));
+                        if (old != null && item.restartCount() > old.restartCount())
+                            eventLog.add(new EventLogBuffer.Event(Instant.now(), EventLogBuffer.Severity.WARM,
+                                    "Container " + item.name() + " restarted"));
+                    }
+                    containers.set(next);
                     selected.updateAndGet(value -> Math.max(0, Math.min(value, containers.get().size() - 1)));
                     error.set(null);
                     message.set(containers.get().size() + " containers • updated");

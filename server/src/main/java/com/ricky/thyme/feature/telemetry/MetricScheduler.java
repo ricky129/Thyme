@@ -37,9 +37,20 @@ public final class MetricScheduler implements AutoCloseable {
         series.add(new Series(buffer, seconds, provider));
     }
 
+    /** Removes page-specific registrations before the page is shown again. */
+    public synchronized void clear() { series.clear(); tick = 0; }
+
     /** Starts the shared clock once; the first tick occurs after one second. */
     public synchronized void start() {
         if (task == null) task = executor.scheduleAtFixedRate(this::tick, 1, 1, TimeUnit.SECONDS);
+    }
+
+    /** Stops delivery without destroying the scheduler; it may be started again on page show. */
+    public synchronized void stop() {
+        if (task != null) {
+            task.cancel(false);
+            task = null;
+        }
     }
 
     /** Performs one tick synchronously; useful for deterministic tests and manual clocks. */
@@ -58,7 +69,7 @@ public final class MetricScheduler implements AutoCloseable {
     }
 
     @Override public synchronized void close() {
-        if (task != null) task.cancel(false);
+        stop();
         executor.shutdownNow();
     }
 
