@@ -275,13 +275,13 @@ public final class DashboardPage extends Page {
         String state = value == null ? "unknown" : value >= 95 ? "critical" : value >= 85 ? "warning" : "ok";
         transition("filesystem:" + filesystem.mountPoint(), state,
                 "Filesystem " + filesystem.mountPoint() + " above threshold (" + state + ")",
-                state.equals("critical") ? EventLogBuffer.Severity.CRITICAL : EventLogBuffer.Severity.WARM);
+                "critical".equals(state) ? EventLogBuffer.Severity.CRITICAL : EventLogBuffer.Severity.WARM);
     }
 
     private void thresholdEvent(String key, Double value, double warning, double critical, String label) {
         String state = value == null ? "unknown" : value >= critical ? "critical" : value >= warning ? "warning" : "ok";
         transition(key, state, label + " above threshold (" + state + ")",
-                state.equals("critical") ? EventLogBuffer.Severity.CRITICAL : EventLogBuffer.Severity.WARM);
+                "critical".equals(state) ? EventLogBuffer.Severity.CRITICAL : EventLogBuffer.Severity.WARM);
     }
 
     private void recordProviderError(String provider, String detail) {

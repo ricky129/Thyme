@@ -2,6 +2,7 @@ package com.ricky.thyme.feature.telemetry;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -17,7 +18,7 @@ public final class MetricScheduler implements AutoCloseable {
 
     private static final long TICK_NANOS = Duration.ofSeconds(1).toNanos();
     private final ScheduledExecutorService executor;
-    private final ArrayList<Series> series = new ArrayList<>();
+    private final List<Series> series = new ArrayList<>();
     private ScheduledFuture<?> task;
     private long tick;
 
@@ -66,8 +67,7 @@ public final class MetricScheduler implements AutoCloseable {
     private synchronized void tick() {
         long now = System.nanoTime();
         tick++;
-        for (int i = 0; i < series.size(); i++) {
-            Series item = series.get(i);
+        for (Series item : series) {
             double value = tick % item.cadenceSeconds == 0 ? item.provider.getAsDouble() : Double.NaN;
             item.buffer.appendAt(value, now);
         }

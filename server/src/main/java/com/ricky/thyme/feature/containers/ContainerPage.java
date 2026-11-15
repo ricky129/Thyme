@@ -162,7 +162,7 @@ public final class ContainerPage extends Page {
                         ContainerSnapshot old = previous.get(item.id());
                         String state = item.state().toLowerCase();
                         if (old != null && !old.state().equalsIgnoreCase(item.state())
-                                && (state.equals("exited") || state.equals("stopped")))
+                                && ("exited".equals(state) || "stopped".equals(state)))
                             eventLog.add(new EventLogBuffer.Event(Instant.now(), EventLogBuffer.Severity.WARM,
                                     "Container " + item.name() + " stopped"));
                         if (old != null && item.restartCount() > old.restartCount())

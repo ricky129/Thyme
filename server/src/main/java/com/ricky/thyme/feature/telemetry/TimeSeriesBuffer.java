@@ -125,7 +125,7 @@ public final class TimeSeriesBuffer {
             result = maximum ? (Double.isNaN(result) ? value : Math.max(result, value)) : result + value;
             count++;
         }
-        return count == 0 ? Double.NaN : (maximum ? result : result / count);
+        return count == 0 ? Double.NaN : maximum ? result : result / count;
     }
 
     /** Elapsed tick coverage retained by this range, including an incomplete current bucket. */

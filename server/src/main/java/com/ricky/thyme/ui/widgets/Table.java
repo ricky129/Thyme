@@ -1,6 +1,5 @@
 package com.ricky.thyme.ui.widgets;
 
-import com.googlecode.lanterna.TerminalSize;
 import com.googlecode.lanterna.graphics.TextGraphics;
 import com.ricky.thyme.ui.Theme;
 import java.util.List;
@@ -54,10 +53,9 @@ public final class Table {
         }
 
         // Data rows
-        int visibleRows = h - row;
         int dataStart = Math.max(0, scrollOffset);
-        for (int i = dataStart; i < rows.size() && (row < h); i++, row++) {
-            boolean selected = (i == selectedRow);
+        for (int i = dataStart; i < rows.size() && row < h; i++, row++) {
+            boolean selected = i == selectedRow;
             drawRow(g, x, y + row, w, rows.get(i), cw, selected, true);
         }
     }

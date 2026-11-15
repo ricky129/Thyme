@@ -58,7 +58,8 @@ public final class RingBuffer {
         if (start < 0) start += buffer.length;
         for (int i = 0; i < size; i++) {
             snapshot[i] = buffer[start];
-            if (++start == buffer.length) start = 0;
+            start++;
+            if (start == buffer.length) start = 0;
         }
         snapshotValid = true;
         return snapshot;
@@ -73,7 +74,8 @@ public final class RingBuffer {
         if (start < 0) start += buffer.length;
         for (int i = 0; i < size; i++) {
             destination[i] = buffer[start];
-            if (++start == buffer.length) start = 0;
+            start++;
+            if (start == buffer.length) start = 0;
         }
         return size;
     }

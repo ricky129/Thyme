@@ -22,7 +22,6 @@ import com.ricky.thyme.ui.Theme;
  */
 public final class LineChart {
 
-    private static final char[] BLOCK_LEVELS = {'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'};
     private static final int Y_AXIS_WIDTH = 5; // "100% " or " n/a "
     private static final int X_AXIS_HEIGHT = 1;
 
@@ -186,7 +185,6 @@ public final class LineChart {
             int plotRow = y + h - 1 - row;
             // Row covers value range [(row)/h, (row+1)/h] of maxValue
             double rowLo = (double) row / h * maxValue;
-            double rowHi = (double) (row + 1) / h * maxValue;
             boolean lFill = leftVal  >= rowLo;
             boolean rFill = rightVal >= rowLo;
             if (!lFill && !rFill) continue;

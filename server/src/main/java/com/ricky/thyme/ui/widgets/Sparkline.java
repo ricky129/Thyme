@@ -1,7 +1,6 @@
 package com.ricky.thyme.ui.widgets;
 
 import com.googlecode.lanterna.graphics.TextGraphics;
-import com.ricky.thyme.ui.Theme;
 
 /**
  * An inline sparkline drawn entirely with Unicode block elements.
@@ -22,8 +21,6 @@ public final class Sparkline {
      * Each cell encodes two columns of four bits each (left col, right col).
      * Bit 0 = top, bit 3 = bottom of each column.
      */
-    private static final int[] BRAILLE_ROW_BITS = {0x01, 0x02, 0x04, 0x08};
-
     private Sparkline() {}
 
     /**
@@ -108,8 +105,8 @@ public final class Sparkline {
             int leftPos  = col * 2;
             int rightPos = col * 2 + 1;
 
-            double leftVal  = valueAt(history, histStart, histCount, padCount, leftPos);
-            double rightVal = valueAt(history, histStart, histCount, padCount, rightPos);
+            double leftVal  = valueAt(history, histStart, padCount, leftPos);
+            double rightVal = valueAt(history, histStart, padCount, rightPos);
 
             int leftDots  = sampleToDots(leftVal,  leftPos  >= padCount);
             int rightDots = sampleToDots(rightVal, rightPos >= padCount);
@@ -121,9 +118,9 @@ public final class Sparkline {
 
     /** Returns the value at virtual buffer position {@code pos} (0 = oldest pad slot). */
     private static double valueAt(
-            double[] history, int histStart, int histCount, int padCount, int pos) {
+            double[] history, int histStart, int padCount, int pos) {
         if (pos < padCount) return 0.0; // padding
-        int idx = histStart + (pos - padCount);
+        int idx = histStart + pos - padCount;
         if (idx < history.length) return history[idx];
         return 0.0;
     }

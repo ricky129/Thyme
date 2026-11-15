@@ -58,8 +58,8 @@ public final class Theme {
         String colorterm = System.getenv("COLORTERM");
         TRUECOLOR = !NO_COLOR
                 && colorterm != null
-                && (colorterm.equalsIgnoreCase("truecolor")
-                        || colorterm.equalsIgnoreCase("24bit"));
+                && ("truecolor".equalsIgnoreCase(colorterm)
+                        || "24bit".equalsIgnoreCase(colorterm));
     }
 
     // -------------------------------------------------------------------------

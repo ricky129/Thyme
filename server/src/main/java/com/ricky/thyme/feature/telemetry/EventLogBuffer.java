@@ -38,7 +38,7 @@ public final class EventLogBuffer {
 
     /** Returns oldest-first entries. Allocation happens only when the UI asks to render the log. */
     public synchronized List<Event> snapshot() {
-        ArrayList<Event> result = new ArrayList<>(size);
+        List<Event> result = new ArrayList<>(size);
         int start = head - size;
         if (start < 0) start += events.length;
         for (int i = 0; i < size; i++) result.add(events[(start + i) % events.length]);

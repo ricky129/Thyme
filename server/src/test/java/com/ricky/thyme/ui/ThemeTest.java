@@ -1,6 +1,5 @@
 package com.ricky.thyme.ui;
 
-import com.googlecode.lanterna.TextColor;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
