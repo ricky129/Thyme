@@ -1,15 +1,12 @@
 package com.ricky.thyme.feature.containers;
 
 import com.ricky.thyme.exec.CommandRunner;
-import java.io.IOException;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
 
 class ContainerProviderTest {
     private static final String RUNNING_ID = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";

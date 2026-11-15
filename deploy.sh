@@ -158,6 +158,13 @@ printf '==> Preparing the remote directory...\n'
 REMOTE_SHELL_DIR="${REMOTE_DIR/#\~/\$HOME}"
 ssh "${SSH_OPTS[@]}" "$TARGET" "mkdir -p \"$REMOTE_SHELL_DIR\""
 
+printf '==> Making the existing server runtime writable...\n'
+if ! ssh "${SSH_OPTS[@]}" "$TARGET" \
+    "sh -c 'if [ -d \"$REMOTE_SHELL_DIR/thyme-server-runtime\" ]; then chmod -R u+w \"$REMOTE_SHELL_DIR/thyme-server-runtime\"; fi'"; then
+    printf 'Error: could not make the existing server runtime writable.\n' >&2
+    exit 1
+fi
+
 printf '==> Transferring the server runtime...\n'
 scp "${SCP_OPTS[@]}" -r \
     "$SCRIPT_DIR/server/target/thyme-server-runtime" \

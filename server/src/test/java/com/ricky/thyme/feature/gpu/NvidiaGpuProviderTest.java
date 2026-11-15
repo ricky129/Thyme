@@ -1,9 +1,8 @@
 package com.ricky.thyme.feature.gpu;
 
+import com.ricky.thyme.exec.CommandRunner;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import com.ricky.thyme.exec.CommandRunner;
-import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class NvidiaGpuProviderTest {

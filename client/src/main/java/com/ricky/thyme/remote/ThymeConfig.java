@@ -65,7 +65,7 @@ public final class ThymeConfig {
             if (value < 1 || value > 65535)
                 throw new NumberFormatException();
         } catch (NumberFormatException e) {
-            throw new IOException("deploy.port must be between 1 and 65535");
+            throw new IOException("deploy.port must be between 1 and 65535", e);
         }
         return port;
     }

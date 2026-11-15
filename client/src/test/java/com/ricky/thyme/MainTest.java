@@ -54,7 +54,7 @@ class MainTest {
     @Test
     void requiresUsernameInSshTarget() {
         int result = Main.run(
-                new String[] {"100.73.45.88"},
+                new String[] {"host.example"},
                 (target, port, key, remoteDir) -> {
                     throw new AssertionError("target without username must not start SSH");
                 },

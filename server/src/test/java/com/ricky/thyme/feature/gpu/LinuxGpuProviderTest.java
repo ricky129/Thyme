@@ -3,13 +3,10 @@ package com.ricky.thyme.feature.gpu;
 import com.ricky.thyme.exec.CommandRunner;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
-import java.util.List;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class LinuxGpuProviderTest {
     @TempDir Path tempDir;
