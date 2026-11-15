@@ -11,82 +11,102 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.locks.LockSupport;
 
 public final class Shell {
+    private static final long MAX_RENDER_DELAY_NANOS = 1_000_000_000L;
 
-    private final Page dashboard;
-    private final Page containers;
-    private Page page;
+    private final PageRegistry registry;
 
     public Shell(Page page) {
-        this(page, null);
+        this(PageRegistry.of(page));
     }
 
     public Shell(Page dashboard, Page containers) {
-        if (dashboard == null) {
-            throw new IllegalArgumentException("the shell requires a page");
+        this(new PageRegistry(java.util.List.of(
+                new PageRegistry.Entry("overview", dashboard),
+                new PageRegistry.Entry("containers", containers))));
+    }
+
+    public Shell(PageRegistry registry) {
+        if (registry == null) {
+            throw new IllegalArgumentException("the shell requires a page registry");
         }
-        this.dashboard = dashboard;
-        this.containers = containers;
-        this.page = dashboard;
+        this.registry = registry;
     }
 
     public void run() throws IOException {
-        try (var background = Executors.newVirtualThreadPerTaskExecutor(); Screen screen = new TerminalScreen(new DefaultTerminalFactory().createTerminal())) {
+        try (var background = Executors.newVirtualThreadPerTaskExecutor();
+                Screen screen = new TerminalScreen(new DefaultTerminalFactory().createTerminal())) {
             screen.startScreen();
             screen.setCursorPosition(null);
-            page.onShow(background);
-            long nextRender = 0;
+            registry.active().onShow(background);
+            long nextPeriodicRender = 0;
+            TerminalSize lastSize = null;
             boolean running = true;
             try {
                 while (running) {
                     KeyStroke key = screen.pollInput();
                     if (key != null) {
-                        if (key.getKeyType() == KeyType.Character
-                                && key.getCharacter() != null
-                                && (key.getCharacter() == 'q' || key.getCharacter() == 'Q'))
-                            running = false;
-                        else if (containers != null
-                                && page == containers
-                                && key.getKeyType() == KeyType.Escape)
-                            switchPage(background);
-                        else if (containers != null
-                                && key.getKeyType() == KeyType.Character
-                                && key.getCharacter() != null
-                                && (key.getCharacter() == 'd' || key.getCharacter() == 'D'))
-                            switchPage(background);
-                        else {
-                            page.handleKey(key);
-                        }
+                        running = handleKey(key, background);
                     }
 
                     long now = System.nanoTime();
-                    if (now >= nextRender) {
-                        TerminalSize terminalSize = currentTerminalSize(screen);
-                        page.render(screen.newTextGraphics(), terminalSize);
+                    TerminalSize terminalSize = currentTerminalSize(screen);
+                    boolean resized = !terminalSize.equals(lastSize);
+                    if (resized) {
+                        lastSize = terminalSize;
+                    }
+                    if (resized || registry.active().consumeDirty() || now >= nextPeriodicRender) {
+                        registry.active().render(screen.newTextGraphics(), terminalSize);
                         screen.refresh();
-                        nextRender = now + 100_000_000L;
+                        nextPeriodicRender = now + MAX_RENDER_DELAY_NANOS;
                     }
                     LockSupport.parkNanos(30_000_000L);
 
-                    if (Thread.currentThread().isInterrupted())
+                    if (Thread.currentThread().isInterrupted()) {
                         running = false;
+                    }
                 }
             } finally {
-                page.onHide();
-                page.close();
-                if (dashboard != page)
-                    dashboard.close();
-                if (containers != null && containers != page)
-                    containers.close();
+                registry.active().onHide();
+                registry.close();
                 screen.stopScreen();
             }
         }
     }
 
-    private void switchPage(java.util.concurrent.Executor background) {
-        Page next = page == dashboard ? containers : dashboard;
-        page.onHide();
-        page = next;
+    private boolean handleKey(KeyStroke key, java.util.concurrent.Executor background) {
+        Page previous = registry.active();
+        if (key.getKeyType() == KeyType.Character && key.getCharacter() != null
+                && (key.getCharacter() == 'q' || key.getCharacter() == 'Q')) {
+            if (registry.isRoot()) {
+                return false;
+            }
+            returnToRoot(background, previous);
+            return true;
+        }
+        if (key.getKeyType() == KeyType.Escape && !registry.isRoot()) {
+            returnToRoot(background, previous);
+            return true;
+        }
+        if (registry.handleNavigation(key)) {
+            switchToSelected(background, previous);
+            return true;
+        }
+        registry.active().handleKey(key);
+        registry.active().invalidate();
+        return true;
+    }
+
+    private void returnToRoot(java.util.concurrent.Executor background, Page previous) {
+        if (registry.returnToRoot()) {
+            switchToSelected(background, previous);
+        }
+    }
+
+    private void switchToSelected(java.util.concurrent.Executor background, Page previous) {
+        previous.onHide();
+        Page page = registry.active();
         page.onShow(background);
+        page.invalidate();
     }
 
     static TerminalSize currentTerminalSize(Screen screen) {

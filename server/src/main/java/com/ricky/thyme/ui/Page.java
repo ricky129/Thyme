@@ -4,8 +4,11 @@ import com.googlecode.lanterna.TerminalSize;
 import com.googlecode.lanterna.graphics.TextGraphics;
 import com.googlecode.lanterna.input.KeyStroke;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public abstract class Page implements AutoCloseable {
+    private final AtomicBoolean dirty = new AtomicBoolean(true);
+
     public abstract String title();
 
     public void onShow(Executor background) {
@@ -19,6 +22,14 @@ public abstract class Page implements AutoCloseable {
     @Override
     public void close() {
         // Pages without timers have nothing to release.
+    }
+
+    public final void invalidate() {
+        dirty.set(true);
+    }
+
+    public final boolean consumeDirty() {
+        return dirty.getAndSet(false);
     }
 
     public abstract void handleKey(KeyStroke key);
