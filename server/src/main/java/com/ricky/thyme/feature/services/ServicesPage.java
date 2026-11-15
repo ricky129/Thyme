@@ -14,7 +14,9 @@ public final class ServicesPage extends Page {
     private final ServiceProvider manager;
     private final AtomicReference<List<ServiceSnapshot>> services = new AtomicReference<>(List.of());
     private final AtomicBoolean loading = new AtomicBoolean();
-    private volatile String status = "Press r to load services.";
+    // refresh() and its worker write this while render() reads it on the UI thread;
+    // AtomicReference makes worker updates visible to the renderer.
+    private final AtomicReference<String> status = new AtomicReference<>("Press r to load services.");
     private int selected;
     private Executor background;
 
@@ -49,13 +51,13 @@ public final class ServicesPage extends Page {
     public void refresh() {
         if (background == null || !loading.compareAndSet(false, true))
             return;
-        status = "Loading services...";
+        status.set("Loading services...");
         background.execute(() -> {
             try {
                 services.set(manager.list());
-                status = services.get().size() + " services loaded.";
+                status.set(services.get().size() + " services loaded.");
             } catch (Exception e) {
-                status = "Error: " + e.getMessage();
+                status.set("Error: " + e.getMessage());
             } finally {
                 loading.set(false);
             }
@@ -75,7 +77,7 @@ public final class ServicesPage extends Page {
             put(graphics, size, 4 + i, line);
         }
         int statusRow = Math.max(2, size.getRows() - 4);
-        put(graphics, size, statusRow, status);
+        put(graphics, size, statusRow, status.get());
     }
 
     private static void put(TextGraphics graphics, TerminalSize size, int row, String text) {

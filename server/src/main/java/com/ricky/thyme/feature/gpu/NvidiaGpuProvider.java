@@ -91,7 +91,7 @@ public final class NvidiaGpuProvider {
 
     private static Double decimal(String value) {
         String normalized = value.trim();
-        if (normalized.isEmpty() || normalized.equalsIgnoreCase("[n/a]") || normalized.equalsIgnoreCase("n/a"))
+        if (normalized.isEmpty() || "[n/a]".equalsIgnoreCase(normalized) || "n/a".equalsIgnoreCase(normalized))
             return null;
         try {
             double parsed = Double.parseDouble(normalized);

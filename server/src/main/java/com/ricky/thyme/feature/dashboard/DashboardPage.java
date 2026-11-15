@@ -1,7 +1,7 @@
 package com.ricky.thyme.feature.dashboard;
 
-import com.googlecode.lanterna.TerminalSize;
 import com.googlecode.lanterna.TerminalPosition;
+import com.googlecode.lanterna.TerminalSize;
 import com.googlecode.lanterna.TextColor;
 import com.googlecode.lanterna.graphics.TextGraphics;
 import com.googlecode.lanterna.input.KeyStroke;
@@ -63,9 +63,13 @@ public final class DashboardPage extends Page {
     private final AtomicBoolean loading = new AtomicBoolean();
     private final AtomicInteger selectedService = new AtomicInteger();
     private final AtomicLong generation = new AtomicLong();
-    private volatile Executor background;
-    private volatile String pageError;
-    private volatile String serviceMessage = "Loading services...";
+    private Executor background;
+    // sample() writes errors on a worker; render() reads them on the UI thread;
+    // AtomicReference to make the updates visible.
+    private final AtomicReference<String> pageError = new AtomicReference<>();
+    // sample() writes service status on a worker; render() reads it on the UI thread;
+    // so AtomicReference makes the updates visible.
+    private final AtomicReference<String> serviceMessage = new AtomicReference<>("Loading services...");
 
     public DashboardPage(
             OshiCpuProvider cpuProvider,
@@ -124,7 +128,7 @@ public final class DashboardPage extends Page {
             executor.execute(() -> sample(requestGeneration));
         } catch (RejectedExecutionException e) {
             loading.set(false);
-            pageError = "Refresh not started: " + message(e);
+            pageError.set("Refresh not started: " + message(e));
         }
     }
 
@@ -163,15 +167,15 @@ public final class DashboardPage extends Page {
             }
             try {
                 services = serviceProvider.list();
-                serviceMessage = services.size() + " services loaded.";
+                serviceMessage.set(services.size() + " services loaded.");
                 selectedService.set(Math.max(0, Math.min(selectedService.get(), services.size() - 1)));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 errors.put("Services", "Read interrupted");
-                serviceMessage = "Service read interrupted.";
+                serviceMessage.set("Service read interrupted.");
             } catch (IOException | RuntimeException e) {
                 errors.put("Services", message(e));
-                serviceMessage = "Error: " + message(e);
+                serviceMessage.set("Error: " + message(e));
             }
             if (requestGeneration == generation.get()) {
                 snapshot.set(new DashboardSnapshot(Instant.now(), cpu, memory, gpu, disk, services, errors));
@@ -185,11 +189,11 @@ public final class DashboardPage extends Page {
                             appendFilesystemHistory(filesystem.mountPoint(), filesystem.utilizationPercent());
                     }
                 }
-                pageError = null;
+                pageError.set(null);
             }
         } catch (RuntimeException e) {
             if (requestGeneration == generation.get())
-                pageError = "Metrics collection failed: " + message(e);
+                pageError.set("Metrics collection failed: " + message(e));
         } finally {
             loading.set(false);
         }
@@ -258,8 +262,8 @@ public final class DashboardPage extends Page {
         drawPanel(graphics, 0, bottomY, leftWidth, bottomHeight, "GRAPHICS", PURPLE);
         drawPanel(graphics, rightX, bottomY, rightWidth, bottomHeight, "SERVICES", GREEN);
 
-        if (pageError != null)
-            put(graphics, 2, 3, width - 4, "ERROR  " + pageError, RED);
+        if (pageError.get() != null)
+            put(graphics, 2, 3, width - 4, "ERROR  " + pageError.get(), RED);
         else if (current == null)
             put(graphics, 2, 3, width - 4, "Connecting to system metrics...", MUTED);
         else {
@@ -318,17 +322,21 @@ public final class DashboardPage extends Page {
         int bottom = y + height - 1;
         if (row >= bottom)
             return;
-        put(graphics, x + 2, row++, width - 4, shorten(cpu.model(), width - 5), TEXT);
+        put(graphics, x + 2, row, width - 4, shorten(cpu.model(), width - 5), TEXT);
+        row++;
         if (row < bottom)
             row = gauge(graphics, x + 2, row, width - 4, "TOTAL", cpu.totalUsagePercent(), TEAL);
-        if (row < bottom)
-            put(graphics, x + 2, row++, width - 4, "60s " + sparkline(cpuHistory.get(), width - 9), TEAL);
         if (row < bottom) {
-            put(graphics, x + 2, row++, width - 4,
+            put(graphics, x + 2, row, width - 4, "60s " + sparkline(cpuHistory.get(), width - 9), TEAL);
+            row++;
+        }
+        if (row < bottom) {
+            put(graphics, x + 2, row, width - 4,
                 "Temp " + temperature(cpu.temperatureCelsius()) + "   Load "
                         + decimal(cpu.loadAverage1()) + "  " + decimal(cpu.loadAverage5()) + "  "
                         + decimal(cpu.loadAverage15()) + "   " + cpu.logicalProcessors() + " threads",
                 MUTED);
+            row++;
         }
         int coresPerLine = Math.max(1, (width - 5) / 12);
         for (int index = 0; index < cpu.cores().size() && row < bottom; index += coresPerLine) {
@@ -341,7 +349,8 @@ public final class DashboardPage extends Page {
                         .append(percent(value.usagePercent())).append(' ')
                         .append(shortFrequency(value.frequencyHz()));
             }
-            put(graphics, x + 2, row++, width - 4, line.toString(), BLUE);
+            put(graphics, x + 2, row, width - 4, line.toString(), BLUE);
+            row++;
         }
     }
 
@@ -356,12 +365,15 @@ public final class DashboardPage extends Page {
         int row = gauge(graphics, x + 2, y + 1, width - 4, "RAM", ratio(memory.usedBytes(), memory.totalBytes()),
                 BLUE);
         if (row < bottom) {
-            put(graphics, x + 2, row++, width - 4,
+            put(graphics, x + 2, row, width - 4,
                     gib(memory.usedBytes()) + " / " + gib(memory.totalBytes()) + " GiB used",
                     TEXT);
+            row++;
         }
-        if (row < y + height - 1)
-            put(graphics, x + 2, row++, width - 4, "60s " + sparkline(memoryHistory.get(), width - 9), BLUE);
+        if (row < y + height - 1) {
+            put(graphics, x + 2, row, width - 4, "60s " + sparkline(memoryHistory.get(), width - 9), BLUE);
+            row++;
+        }
         if (row < y + height - 1) {
             row = gauge(graphics, x + 2, row, width - 4, "SWAP",
                     ratio(memory.swapUsedBytes(), memory.swapTotalBytes()), PURPLE);
@@ -384,22 +396,25 @@ public final class DashboardPage extends Page {
         for (GpuSnapshot device : gpu.devices()) {
             if (row >= y + height - 1)
                 break;
-            put(graphics, x + 2, row++, width - 4,
+            put(graphics, x + 2, row, width - 4,
                     shorten(device.vendor() + "  " + device.name(), width - 5), TEXT);
+            row++;
             if (row < y + height - 1)
                 row = gauge(graphics, x + 2, row, width - 4, "GPU", device.utilizationPercent(), PURPLE);
             if (row < y + height - 1) {
-                put(graphics, x + 2, row++, width - 4,
+                put(graphics, x + 2, row, width - 4,
                         "VRAM " + memory(device.memoryUsedBytes()) + " / " + memory(device.memoryTotalBytes())
                                 + "   " + temperature(device.temperatureCelsius()),
                         MUTED);
+                row++;
             }
             if (row < y + height - 1) {
-                put(graphics, x + 2, row++, width - 4,
+                put(graphics, x + 2, row, width - 4,
                         "P " + watts(device.powerWatts()) + "/" + watts(device.powerLimitWatts())
                                 + "   C " + mhz(device.graphicsClockMhz())
                                 + "   M " + mhz(device.memoryClockMhz()),
                         MUTED);
+                row++;
             }
         }
         String error = current.errors().get("GPU");
@@ -450,7 +465,7 @@ public final class DashboardPage extends Page {
         List<ServiceSnapshot> services = current.services();
         int usableRows = Math.max(0, height - 3);
         if (services.isEmpty()) {
-            put(graphics, x + 2, y + 1, width - 4, serviceMessage, MUTED);
+            put(graphics, x + 2, y + 1, width - 4, serviceMessage.get(), MUTED);
             return;
         }
         int visible = Math.min(services.size(), usableRows);
@@ -465,7 +480,7 @@ public final class DashboardPage extends Page {
             put(graphics, x + 2, y + 1 + row, width - 4, line, selected ? TEAL : serviceColor(service));
         }
         if (height > 3)
-            put(graphics, x + 2, y + height - 2, width - 4, serviceMessage, MUTED);
+            put(graphics, x + 2, y + height - 2, width - 4, serviceMessage.get(), MUTED);
     }
 
     private static int gauge(

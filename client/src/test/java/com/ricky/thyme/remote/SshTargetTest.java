@@ -17,7 +17,7 @@ class SshTargetTest {
 
     @Test
     void rejectsMissingUsernameOrMalformedComponents() {
-        assertFalse(SshTarget.isValid("100.73.45.88"));
+        assertFalse(SshTarget.isValid("host.example"));
         assertFalse(SshTarget.isValid("@myserver.com"));
         assertFalse(SshTarget.isValid("myserver@"));
         assertFalse(SshTarget.isValid("myserver@@myserver.com"));

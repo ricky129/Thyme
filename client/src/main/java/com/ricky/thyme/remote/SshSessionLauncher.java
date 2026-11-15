@@ -40,7 +40,7 @@ public final class SshSessionLauncher {
                 || !remoteDirectory.matches("(?:~/|/)[A-Za-z0-9_./~-]*")
                 || remoteDirectory.contains("/../")
                 || remoteDirectory.endsWith("/..")
-                || remoteDirectory.equals(".."))
+                || "..".equals(remoteDirectory))
             throw new IllegalArgumentException("invalid remote directory: " + remoteDirectory);
         List<String> command = new ArrayList<>(List.of("ssh"));
         if (port != null && !port.isBlank())
@@ -56,7 +56,7 @@ public final class SshSessionLauncher {
     }
 
     private static String resolveHome(String path) {
-        if (path.equals("~"))
+        if ("~".equals(path))
             return System.getProperty("user.home");
         if (path.startsWith("~/"))
             return Path.of(System.getProperty("user.home"), path.substring(2)).toString();

@@ -20,7 +20,9 @@ public final class MemoryPage extends Page {
     }
 
     @Override
-    public void handleKey(KeyStroke key) {}
+    public void handleKey(KeyStroke key) {
+        // The memory page has no keyboard actions.
+    }
 
     @Override
     public void refresh() {

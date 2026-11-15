@@ -117,6 +117,8 @@ class SshSessionLauncherTest {
         }
 
         @Override
-        public void destroy() {}
+        public void destroy() {
+            // This test double represents an already-completed process.
+        }
     }
 }

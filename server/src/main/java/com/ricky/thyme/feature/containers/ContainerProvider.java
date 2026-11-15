@@ -104,7 +104,7 @@ public final class ContainerProvider {
                     optionalText(json, "RunningFor")));
         }
         rows.sort((left, right) -> {
-            int stateOrder = Boolean.compare(!left.state().equals("running"), !right.state().equals("running"));
+            int stateOrder = Boolean.compare(!"running".equals(left.state()), !"running".equals(right.state()));
             return stateOrder == 0 ? left.name().compareToIgnoreCase(right.name()) : stateOrder;
         });
         return List.copyOf(rows);

@@ -32,11 +32,17 @@ public final class ContainerPage extends Page {
     private final AtomicReference<String> logs = new AtomicReference<>();
     private final AtomicBoolean loading = new AtomicBoolean();
     private final AtomicInteger selected = new AtomicInteger();
-    private volatile Executor background;
-    private volatile boolean details;
-    private volatile String pendingAction;
-    private volatile String message = "Loading Docker containers...";
-    private volatile int logOffset;
+    // The UI thread sets/clears this in onShow()/onHide(); worker action callbacks may also read it in refresh().
+    // AtomicReference safely publishes executor changes to those callbacks.
+    private final AtomicReference<Executor> background = new AtomicReference<>();
+    private boolean details;
+    private String pendingAction;
+    // refresh/action/log workers write status while render() reads it on the UI thread;
+    // AtomicReference makes those updates visible across threads.
+    private final AtomicReference<String> message = new AtomicReference<>("Loading Docker containers...");
+    // loadLogs() resets this on a worker while handleKey()/render() access it on the UI thread;
+    // AtomicInteger makes each reset and scroll update visible and atomic.
+    private final AtomicInteger logOffset = new AtomicInteger();
 
     public ContainerPage(ContainerProvider provider) {
         this.provider = provider;
@@ -49,13 +55,13 @@ public final class ContainerPage extends Page {
 
     @Override
     public void onShow(Executor background) {
-        this.background = background;
+        this.background.set(background);
         refresh();
     }
 
     @Override
     public void onHide() {
-        background = null;
+        background.set(null);
     }
 
     @Override
@@ -63,7 +69,7 @@ public final class ContainerPage extends Page {
         if (key.getKeyType() == KeyType.Escape) {
             if (pendingAction != null) {
                 pendingAction = null;
-                message = "Action cancelled";
+                message.set("Action cancelled");
             } else {
                 details = false;
                 logs.set(null);
@@ -72,14 +78,14 @@ public final class ContainerPage extends Page {
         }
         if (key.getKeyType() == KeyType.ArrowDown) {
             if (details && logs.get() != null)
-                logOffset++;
+                logOffset.incrementAndGet();
             else
                 selected.updateAndGet(value -> Math.min(value + 1, Math.max(0, containers.get().size() - 1)));
             return;
         }
         if (key.getKeyType() == KeyType.ArrowUp) {
             if (details && logs.get() != null)
-                logOffset = Math.max(0, logOffset - 1);
+                logOffset.updateAndGet(value -> Math.max(0, value - 1));
             else
                 selected.updateAndGet(value -> Math.max(0, value - 1));
             return;
@@ -97,7 +103,7 @@ public final class ContainerPage extends Page {
                 executePendingAction();
             else if (character == 'n') {
                 pendingAction = null;
-                message = "Action cancelled";
+                message.set("Action cancelled");
             }
             return;
         }
@@ -122,7 +128,7 @@ public final class ContainerPage extends Page {
 
     @Override
     public void refresh() {
-        Executor executor = background;
+        Executor executor = background.get();
         if (executor == null || !loading.compareAndSet(false, true))
             return;
         try {
@@ -131,12 +137,14 @@ public final class ContainerPage extends Page {
                     containers.set(provider.list());
                     selected.updateAndGet(value -> Math.max(0, Math.min(value, containers.get().size() - 1)));
                     error.set(null);
-                    message = containers.get().size() + " containers • updated";
-                } catch (IOException | InterruptedException e) {
-                    if (e instanceof InterruptedException)
-                        Thread.currentThread().interrupt();
+                    message.set(containers.get().size() + " containers • updated");
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                     error.set(message(e));
-                    message = "Docker unavailable";
+                    message.set("Docker unavailable");
+                } catch (IOException e) {
+                    error.set(message(e));
+                    message.set("Docker unavailable");
                 } finally {
                     loading.set(false);
                 }
@@ -152,7 +160,7 @@ public final class ContainerPage extends Page {
         if (container == null)
             return;
         pendingAction = action;
-        message = "Confirm " + action + " for " + container.name() + "? Press y / n";
+        message.set("Confirm " + action + " for " + container.name() + "? Press y / n");
     }
 
     private void executePendingAction() {
@@ -161,10 +169,10 @@ public final class ContainerPage extends Page {
         pendingAction = null;
         if (action == null || container == null)
             return;
-        Executor executor = background;
+        Executor executor = background.get();
         if (executor == null)
             return;
-        message = action + " in progress...";
+        message.set(action + " in progress...");
         executor.execute(() -> {
             try {
                 switch (action) {
@@ -173,32 +181,34 @@ public final class ContainerPage extends Page {
                     case "restart" -> provider.restart(container.id());
                     default -> throw new IllegalArgumentException("Unsupported container action");
                 }
-                message = action + " completed";
+                message.set(action + " completed");
                 refresh();
-            } catch (IOException | InterruptedException e) {
-                if (e instanceof InterruptedException)
-                    Thread.currentThread().interrupt();
-                message = "Docker action failed: " + message(e);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                message.set("Docker action failed: " + message(e));
+            } catch (IOException e) {
+                message.set("Docker action failed: " + message(e));
             }
         });
     }
 
     private void loadLogs() {
         ContainerSnapshot container = selectedContainer();
-        Executor executor = background;
+        Executor executor = background.get();
         if (container == null || executor == null)
             return;
-        message = "Loading recent logs...";
+        message.set("Loading recent logs...");
         executor.execute(() -> {
             try {
                 logs.set(provider.logs(container.id()));
-                logOffset = 0;
+                logOffset.set(0);
                 long errors = logs.get().lines().filter(ContainerPage::looksLikeError).count();
-                message = "Recent logs • " + errors + " error/warning lines • ↑/↓ scroll";
-            } catch (IOException | InterruptedException e) {
-                if (e instanceof InterruptedException)
-                    Thread.currentThread().interrupt();
-                message = "Log read failed: " + message(e);
+                message.set("Recent logs • " + errors + " error/warning lines • ↑/↓ scroll");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                message.set("Log read failed: " + message(e));
+            } catch (IOException e) {
+                message.set("Log read failed: " + message(e));
             }
         });
     }
@@ -248,7 +258,7 @@ public final class ContainerPage extends Page {
         }
         List<ContainerSnapshot> current = containers.get();
         if (current.isEmpty()) {
-            put(graphics, 2, 3, width - 4, "No containers found. " + message, MUTED);
+            put(graphics, 2, 3, width - 4, "No containers found. " + message.get(), MUTED);
             return;
         }
         put(graphics, 2, 3, width - 4,
@@ -273,7 +283,7 @@ public final class ContainerPage extends Page {
             put(graphics, 2, 4 + offset, width - 4, line,
                     isSelected ? TEAL : container.state().equalsIgnoreCase("running") ? GREEN : MUTED);
         }
-        put(graphics, 2, height - 3, width - 4, message, MUTED);
+        put(graphics, 2, height - 3, width - 4, message.get(), MUTED);
     }
 
     private void drawDetails(TextGraphics graphics, int width, int height) {
@@ -294,26 +304,28 @@ public final class ContainerPage extends Page {
             "Network I/O: " + blank(container.networkIo()) + "  •  Block I/O: " + blank(container.blockIo()),
         };
         int row = 3;
-        for (String field : fields)
-            put(graphics, 2, row++, width - 4, field, row == 4 ? TEAL : TEXT);
+        for (String field : fields) {
+            put(graphics, 2, row, width - 4, field, row == 3 ? TEAL : TEXT);
+            row++;
+        }
         String value = logs.get();
         if (value == null) {
             put(graphics, 2, row + 1, width - 4, "Press l to load the latest 200 log lines.", MUTED);
             if (pendingAction != null)
-                put(graphics, 2, row + 2, width - 4, message, ORANGE);
-            else if (message != null)
-                put(graphics, 2, row + 2, width - 4, message, MUTED);
+                put(graphics, 2, row + 2, width - 4, message.get(), ORANGE);
+            else if (message.get() != null)
+                put(graphics, 2, row + 2, width - 4, message.get(), MUTED);
             return;
         }
         List<String> lines = new ArrayList<>(value.lines().toList());
         int logHeight = Math.max(0, height - row - 7);
-        int start = Math.max(0, Math.min(logOffset, lines.size() - logHeight));
+        int start = Math.max(0, Math.min(logOffset.get(), lines.size() - logHeight));
         put(graphics, 2, row, width - 4, "RECENT LOGS", ORANGE);
         for (int offset = 0; offset < logHeight && start + offset < lines.size(); offset++) {
             String line = lines.get(start + offset);
             put(graphics, 2, row + 1 + offset, width - 4, line, looksLikeError(line) ? RED : MUTED);
         }
-        put(graphics, 2, height - 3, width - 4, message, MUTED);
+        put(graphics, 2, height - 3, width - 4, message.get(), MUTED);
     }
 
     private static void panel(TextGraphics graphics, int x, int y, int width, int height, String title) {

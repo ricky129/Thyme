@@ -44,7 +44,7 @@ public final class LinuxGpuProvider implements GpuProvider {
             for (Path card : cards) {
                 try {
                     String vendor = java.nio.file.Files.readString(card.resolve("device/vendor")).strip();
-                    if (vendor.equalsIgnoreCase("0x10de"))
+                    if ("0x10de".equalsIgnoreCase(vendor))
                         nvidiaCards.add(card);
                 } catch (IOException e) {
                     errors.add("GPU " + card.getFileName() + ": " + e.getMessage());

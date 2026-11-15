@@ -81,7 +81,7 @@ public final class ThymeConfig {
         if (!directory.matches("(?:~/|/)[A-Za-z0-9_./~-]*")
                 || directory.contains("/../")
                 || directory.endsWith("/..")
-                || directory.equals(".."))
+                || "..".equals(directory))
             throw new IOException("deploy.remote_dir contains invalid characters or path segments");
         return directory;
     }

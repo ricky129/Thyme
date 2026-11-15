@@ -254,7 +254,7 @@ public final class LinuxDiskProvider implements DiskProvider {
     }
 
     private List<String> backingDevices(String source, String mountPoint, String type) throws IOException {
-        if (type.equals("btrfs") && commandRunner != null) {
+        if ("btrfs".equals(type) && commandRunner != null) {
             try {
                 var result = commandRunner.run(
                         List.of("btrfs", "filesystem", "show", "--raw", mountPoint),

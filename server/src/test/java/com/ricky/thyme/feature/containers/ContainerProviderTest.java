@@ -43,7 +43,7 @@ class ContainerProviderTest {
         assertEquals(2, containers.getFirst().restartCount());
         assertEquals("20MiB / 1GiB", containers.getFirst().memoryUsage());
         assertEquals(1, containers.get(1).exitCode());
-        assertTrue(calls.stream().allMatch(command -> command.getFirst().equals("docker")));
+        assertTrue(calls.stream().allMatch(command -> "docker".equals(command.getFirst())));
     }
 
     @Test
@@ -51,7 +51,7 @@ class ContainerProviderTest {
         List<List<String>> calls = new ArrayList<>();
         ContainerProvider provider = new ContainerProvider((command, timeout) -> {
             calls.add(command);
-            return command.get(1).equals("logs")
+            return "logs".equals(command.get(1))
                     ? ok("2026-01-01T00:00:00Z error: failed to start\n")
                     : ok("");
         });
