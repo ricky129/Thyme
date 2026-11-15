@@ -43,3 +43,4 @@ build/
 *.md
 !architecture.md
 !/ARCHITECTURE.md
+!/README.md
