@@ -5,7 +5,7 @@ import com.googlecode.lanterna.graphics.TextGraphics;
 import com.googlecode.lanterna.input.KeyStroke;
 import java.util.concurrent.Executor;
 
-public abstract class Page {
+public abstract class Page implements AutoCloseable {
     public abstract String title();
 
     public void onShow(Executor background) {
@@ -14,6 +14,11 @@ public abstract class Page {
 
     public void onHide() {
         // Subclasses may override this hook to release page-specific resources.
+    }
+
+    @Override
+    public void close() {
+        // Pages without timers have nothing to release.
     }
 
     public abstract void handleKey(KeyStroke key);

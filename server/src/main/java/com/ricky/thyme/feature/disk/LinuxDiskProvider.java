@@ -24,6 +24,8 @@ public final class LinuxDiskProvider implements DiskProvider {
     private final Path filesystemRoot;
     private final CommandRunner commandRunner;
     private Map<String, Counters> previousCounters = Map.of();
+    private final Map<String, List<String>> btrfsDevices = new HashMap<>();
+    private final Map<String, Long> btrfsDeviceReadNanos = new HashMap<>();
     private long previousSampleNanos;
 
     public LinuxDiskProvider() {
@@ -255,6 +257,10 @@ public final class LinuxDiskProvider implements DiskProvider {
 
     private List<String> backingDevices(String source, String mountPoint, String type) throws IOException {
         if ("btrfs".equals(type) && commandRunner != null) {
+            long now = System.nanoTime();
+            Long previous = btrfsDeviceReadNanos.get(mountPoint);
+            if (previous != null && now - previous < Duration.ofSeconds(10).toNanos())
+                return btrfsDevices.getOrDefault(mountPoint, List.of());
             try {
                 var result = commandRunner.run(
                         List.of("btrfs", "filesystem", "show", "--raw", mountPoint),
@@ -268,9 +274,13 @@ public final class LinuxDiskProvider implements DiskProvider {
                             .filter(name -> isBlockDevice(name))
                             .distinct()
                             .toList();
+                    btrfsDeviceReadNanos.put(mountPoint, now);
+                    btrfsDevices.put(mountPoint, devices);
                     if (!devices.isEmpty())
                         return devices;
                 }
+                btrfsDeviceReadNanos.put(mountPoint, now);
+                btrfsDevices.put(mountPoint, List.of());
                 return List.of();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
