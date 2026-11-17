@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 
 class CpuSnapshotTest {
     @Test
-    void preservesPerCoreMetricsAndAllowsFirstSampleToHaveNoLoad() {
+    void preservesPerCoreMetrics() {
         var snapshot = new CpuSnapshot(
                 "Example CPU",
                 "amd64",
@@ -16,10 +16,7 @@ class CpuSnapshotTest {
                 58.5,
                 List.of(
                         new CpuSnapshot.Core(0, null, 2_400_000_000L),
-                        new CpuSnapshot.Core(1, 42.5, null)),
-                1.0,
-                0.8,
-                0.5);
+                        new CpuSnapshot.Core(1, 42.5, null)));
 
         assertEquals(2, snapshot.logicalProcessors());
         assertEquals(58.5, snapshot.temperatureCelsius());
@@ -32,14 +29,14 @@ class CpuSnapshotTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new CpuSnapshot("CPU", "amd64", 2, 30.0, null,
-                        List.of(new CpuSnapshot.Core(0, 30.0, null)), null, null, null));
+                        List.of(new CpuSnapshot.Core(0, 30.0, null))));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new CpuSnapshot("CPU", "amd64", 1, 101.0, null,
-                        List.of(new CpuSnapshot.Core(0, 30.0, null)), null, null, null));
+                        List.of(new CpuSnapshot.Core(0, 30.0, null))));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new CpuSnapshot("CPU", "amd64", 1, 30.0, Double.NaN,
-                        List.of(new CpuSnapshot.Core(0, 30.0, null)), null, null, null));
+                        List.of(new CpuSnapshot.Core(0, 30.0, null))));
     }
 }

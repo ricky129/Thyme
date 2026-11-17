@@ -142,8 +142,11 @@ public final class LineChart {
             } else {
                 int si = start + col;
                 if (si >= samples.length) break;
-                double v = Math.max(0, Math.min(maxValue, samples[si]));
-                drawBlockColumn(g, x + col, y, h, v, maxValue, color);
+                if (!Double.isNaN(samples[si])) {
+                    double v = Math.max(0, Math.min(maxValue, samples[si]));
+                    int screenCol = samples.length < w ? w - samples.length + si : col;
+                    drawBlockColumn(g, x + screenCol, y, h, v, maxValue, color);
+                }
             }
         }
 
@@ -185,8 +188,8 @@ public final class LineChart {
             int plotRow = y + h - 1 - row;
             // Row covers value range [(row)/h, (row+1)/h] of maxValue
             double rowLo = (double) row / h * maxValue;
-            boolean lFill = leftVal  >= rowLo;
-            boolean rFill = rightVal >= rowLo;
+            boolean lFill = !Double.isNaN(leftVal) && leftVal >= rowLo;
+            boolean rFill = !Double.isNaN(rightVal) && rightVal >= rowLo;
             if (!lFill && !rFill) continue;
 
             // Encode as a simple braille cell: left dot, right dot at top of this row

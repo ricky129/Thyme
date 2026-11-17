@@ -65,12 +65,27 @@ public final class DashboardPage extends Page {
     private final AtomicReference<DashboardSnapshot> snapshot = new AtomicReference<>();
     private final TimeSeriesBuffer cpuHistory = new TimeSeriesBuffer();
     private final TimeSeriesBuffer memoryHistory = new TimeSeriesBuffer();
+    private final TimeSeriesBuffer temperatureHistory = new TimeSeriesBuffer();
+    private final TimeSeriesBuffer gpuHistory = new TimeSeriesBuffer();
+    private final TimeSeriesBuffer diskIoHistory = new TimeSeriesBuffer();
+    private final AtomicReference<List<TimeSeriesBuffer>> coreHistories =
+            new AtomicReference<>(List.of());
     private final Map<String, TimeSeriesBuffer> filesystemHistory = new HashMap<>();
     private final MetricScheduler scheduler = new MetricScheduler();
     private final EventLogBuffer eventLog = new EventLogBuffer();
     private final EventTransitionTracker transitions = new EventTransitionTracker(eventLog);
     private final AtomicBoolean loading = new AtomicBoolean();
     private final AtomicInteger selectedService = new AtomicInteger();
+    private final AtomicInteger selectedCard = new AtomicInteger();
+    private final AtomicBoolean details = new AtomicBoolean();
+    private final AtomicReference<TimeSeriesBuffer.Range> detailRange =
+            new AtomicReference<>(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
+    private final AtomicInteger detailCursor = new AtomicInteger(-1);
+    private final AtomicBoolean perCore = new AtomicBoolean();
+    private final AtomicInteger selectedCore = new AtomicInteger();
+    private final AtomicReference<List<AtomicInteger>> coreCursors =
+            new AtomicReference<>(List.of());
+    private final AtomicBoolean explainer = new AtomicBoolean(true);
     private final AtomicLong generation = new AtomicLong();
     private Executor background;
     // sample() writes errors on a worker; render() reads them on the UI thread;
@@ -132,15 +147,124 @@ public final class DashboardPage extends Page {
 
     @Override
     public void handleKey(KeyStroke key) {
-        if (key.getKeyType() == KeyType.ArrowDown) {
-            selectedService.updateAndGet(value -> Math.min(value + 1, Math.max(0, serviceCount() - 1)));
-        } else if (key.getKeyType() == KeyType.ArrowUp) {
-            selectedService.updateAndGet(value -> Math.max(0, value - 1));
+        if (key.getKeyType() == KeyType.Escape) {
+            details.set(false);
+        } else if (key.getKeyType() == KeyType.Enter) {
+            if (details.get()) {
+                details.set(false);
+            } else {
+                details.set(true);
+                resetDetailState();
+            }
+        } else if (details.get() && key.getKeyType() == KeyType.Tab) {
+            perCore.set(!perCore.get());
+            selectedCore.set(Math.max(0, Math.min(selectedCore.get(), coreHistories.get().size() - 1)));
+        } else if (details.get() && perCore.get() && isNextCoreKey(key)) {
+            selectedCore.updateAndGet(value -> Math.min(value + 1, Math.max(0, coreHistories.get().size() - 1)));
+        } else if (details.get() && perCore.get() && isPreviousCoreKey(key)) {
+            selectedCore.updateAndGet(value -> Math.max(0, value - 1));
+        } else if (details.get() && isNextRangeKey(key)) {
+            detailRange.updateAndGet(TimeSeriesBuffer.Range::next);
+            resetCursor();
+        } else if (details.get() && isPreviousRangeKey(key)) {
+            detailRange.updateAndGet(TimeSeriesBuffer.Range::previous);
+            resetCursor();
+        } else if (details.get() && isNextCursorKey(key)) {
+            moveCursor(1);
+        } else if (details.get() && isPreviousCursorKey(key)) {
+            moveCursor(-1);
+        } else if (details.get() && key.getKeyType() == KeyType.Character && key.getCharacter() != null
+                && Character.toLowerCase(key.getCharacter()) == 'e') {
+            explainer.set(!explainer.get());
+        } else if (isNextCardKey(key)) {
+            selectedCard.updateAndGet(value -> Math.min(value + 1, 4));
+        } else if (isPreviousCardKey(key)) {
+            selectedCard.updateAndGet(value -> Math.max(0, value - 1));
         } else if (key.getKeyType() == KeyType.Character && key.getCharacter() != null) {
             if (Character.toLowerCase(key.getCharacter()) == 'r') {
                 refresh();
             }
         }
+    }
+
+    private void resetDetailState() {
+        detailRange.set(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
+        perCore.set(false);
+        selectedCore.set(0);
+        explainer.set(true);
+        resetCursor();
+    }
+
+    private void resetCursor() {
+        if (perCore.get()) {
+            AtomicInteger cursor = selectedCoreCursor();
+            if (cursor != null) cursor.set(-1);
+        } else {
+            detailCursor.set(-1);
+        }
+    }
+
+    private void moveCursor(int delta) {
+        TimeSeriesBuffer history = perCore.get() && selectedCard.get() == 0
+                ? selectedCoreHistory() : historyForSelectedCard();
+        if (history == null) {
+            return;
+        }
+        int length = history.samples(detailRange.get()).length;
+        if (length == 0) {
+            return;
+        }
+        AtomicInteger cursorState = perCore.get() && selectedCard.get() == 0
+                ? selectedCoreCursor() : detailCursor;
+        if (cursorState == null) return;
+        int current = cursorState.get();
+        if (current < 0) {
+            if (delta > 0) {
+                return;
+            }
+            current = length - 1;
+        } else if (delta > 0 && current == length - 1) {
+            cursorState.set(-1);
+            return;
+        } else {
+            current = Math.max(0, Math.min(length - 1, current + delta));
+        }
+        cursorState.set(current);
+    }
+
+    private AtomicInteger selectedCoreCursor() {
+        List<AtomicInteger> cursors = coreCursors.get();
+        int index = selectedCore.get();
+        return index >= 0 && index < cursors.size() ? cursors.get(index) : null;
+    }
+
+    private TimeSeriesBuffer selectedCoreHistory() {
+        List<TimeSeriesBuffer> histories = coreHistories.get();
+        int index = selectedCore.get();
+        return index >= 0 && index < histories.size() ? histories.get(index) : null;
+    }
+
+    private TimeSeriesBuffer historyForSelectedCard() {
+        return switch (selectedCard.get()) {
+            case 0 -> cpuHistory;
+            case 1 -> memoryHistory;
+            case 2 -> temperatureHistory;
+            case 3 -> gpuHistory;
+            case 4 -> diskIoHistory;
+            default -> null;
+        };
+    }
+
+    private static boolean isNextCoreKey(KeyStroke key) {
+        return key.getKeyType() == KeyType.ArrowDown
+                || key.getKeyType() == KeyType.Character && key.getCharacter() != null
+                && Character.toLowerCase(key.getCharacter()) == 'j';
+    }
+
+    private static boolean isPreviousCoreKey(KeyStroke key) {
+        return key.getKeyType() == KeyType.ArrowUp
+                || key.getKeyType() == KeyType.Character && key.getCharacter() != null
+                && Character.toLowerCase(key.getCharacter()) == 'k';
     }
 
     @Override
@@ -190,9 +314,13 @@ public final class DashboardPage extends Page {
         }
         Double cpuUsage = cpu == null ? null : cpu.totalUsagePercent();
         cpuHistory.append(cpuUsage == null ? Double.NaN : cpuUsage);
+        appendCoreHistories(cpu);
+        temperatureHistory.append(cpu == null || cpu.temperatureCelsius() == null
+                ? Double.NaN : cpu.temperatureCelsius());
         memoryHistory.append(memory == null
                 ? Double.NaN
                 : ratio(memory.usedBytes(), memory.totalBytes()));
+        diskIoHistory.append(totalDiskIo(disk));
         if (disk != null) {
             for (DiskSnapshot.Filesystem fs : disk.filesystems()) {
                 Double utilization = fs.utilizationPercent();
@@ -206,9 +334,37 @@ public final class DashboardPage extends Page {
         updateSnapshot(cpu, memory, null, disk, null, errors);
     }
 
+    private void appendCoreHistories(CpuSnapshot cpu) {
+        int coreCount = cpu == null ? coreHistories.get().size() : cpu.cores().size();
+        ensureCoreHistories(coreCount);
+        List<TimeSeriesBuffer> histories = coreHistories.get();
+        for (int index = 0; index < histories.size(); index++) {
+            Double usage = cpu == null || index >= cpu.cores().size()
+                    ? null : cpu.cores().get(index).usagePercent();
+            histories.get(index).append(usage == null ? Double.NaN : usage);
+        }
+    }
+
+    private void ensureCoreHistories(int coreCount) {
+        List<TimeSeriesBuffer> current = coreHistories.get();
+        if (current.size() == coreCount) return;
+        List<TimeSeriesBuffer> next = new java.util.ArrayList<>();
+        List<AtomicInteger> nextCursors = new java.util.ArrayList<>();
+        for (int index = 0; index < coreCount; index++) {
+            next.add(index < current.size() ? current.get(index) : new TimeSeriesBuffer());
+            List<AtomicInteger> cursors = coreCursors.get();
+            nextCursors.add(index < cursors.size() ? cursors.get(index) : new AtomicInteger(-1));
+        }
+        coreHistories.set(List.copyOf(next));
+        coreCursors.set(List.copyOf(nextCursors));
+        selectedCore.updateAndGet(value -> Math.max(0, Math.min(value, Math.max(0, coreCount - 1))));
+    }
+
     private void sampleGpu() {
         try {
             GpuReading gpu = gpuProvider.read();
+            Double utilization = firstGpuUtilization(gpu);
+            gpuHistory.append(utilization == null ? Double.NaN : utilization);
             Map<String, String> errors = new LinkedHashMap<>();
             if (!gpu.errors().isEmpty()) {
                 errors.put("GPU", String.join("; ", gpu.errors()));
@@ -220,8 +376,10 @@ public final class DashboardPage extends Page {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            gpuHistory.append(Double.NaN);
             recordProviderError("GPU", "Read interrupted");
         } catch (RuntimeException e) {
+            gpuHistory.append(Double.NaN);
             recordProviderError("GPU", message(e));
         }
     }
@@ -265,6 +423,36 @@ public final class DashboardPage extends Page {
         return eventLog;
     }
 
+    int selectedCard() {
+        return selectedCard.get();
+    }
+
+    boolean showingDetails() {
+        return details.get();
+    }
+
+    @Override
+    public boolean capturesGlobalNavigation() {
+        return details.get();
+    }
+
+    TimeSeriesBuffer.Range detailRange() {
+        return detailRange.get();
+    }
+
+    boolean perCoreSelected() {
+        return perCore.get();
+    }
+
+    int detailCursor() {
+        AtomicInteger cursor = perCore.get() && selectedCard.get() == 0 ? selectedCoreCursor() : detailCursor;
+        return cursor == null ? -1 : cursor.get();
+    }
+
+    int selectedCore() {
+        return selectedCore.get();
+    }
+
     @Override
     public void close() {
         scheduler.close();
@@ -298,51 +486,74 @@ public final class DashboardPage extends Page {
         return current == null ? 0 : current.services().size();
     }
 
+    private static double totalDiskIo(DiskSnapshot disk) {
+        if (disk == null) {
+            return Double.NaN;
+        }
+        double total = 0;
+        boolean available = false;
+        for (DiskSnapshot.Device device : disk.devices()) {
+            if (device.readBytesPerSecond() != null) {
+                total += device.readBytesPerSecond();
+                available = true;
+            }
+            if (device.writeBytesPerSecond() != null) {
+                total += device.writeBytesPerSecond();
+                available = true;
+            }
+        }
+        return available ? total / (1024 * 1024) : Double.NaN;
+    }
+
+    private static Double firstGpuUtilization(GpuReading gpu) {
+        return gpu.devices().isEmpty() ? null : gpu.devices().get(0).utilizationPercent();
+    }
+
     @Override
     public void render(TextGraphics graphics, TerminalSize size) {
-        int width = size.getColumns();
-        int height = size.getRows();
-        graphics.setBackgroundColor(BACKGROUND);
-        graphics.setForegroundColor(TEXT);
-        graphics.fill(' ');
-        if (width < 48 || height < 15) {
-            put(graphics, 1, 1, width - 2, "Thyme requires a terminal of at least 48x15.", ORANGE);
-            return;
+        DashboardOverviewRenderer.draw(graphics, size, snapshot.get(), cpuHistory, memoryHistory,
+                temperatureHistory, gpuHistory, diskIoHistory,
+                eventLog, pageError.get(), selectedCard.get(), details.get(), detailRange.get(),
+                detailCursor(), perCore.get(), explainer.get(), coreHistories.get(), selectedCore.get(),
+                coreCursors.get().stream().mapToInt(AtomicInteger::get).toArray());
+    }
+
+    private static boolean isNextCardKey(KeyStroke key) {
+        if (key.getKeyType() == KeyType.ArrowRight || key.getKeyType() == KeyType.ArrowDown) {
+            return true;
         }
+        return key.getKeyType() == KeyType.Character && key.getCharacter() != null
+                && Character.toLowerCase(key.getCharacter()) == 'l';
+    }
 
-        drawHeader(graphics, width);
-        drawFooter(graphics, width, height);
-
-        int contentTop = 2;
-        int contentHeight = height - contentTop - 1;
-        int topHeight = contentHeight / 3;
-        int storageHeight = Math.min(
-                Math.max(4, contentHeight * 2 / 5),
-                Math.max(4, contentHeight - topHeight - 3));
-        int bottomHeight = contentHeight - topHeight - storageHeight;
-        int leftWidth = (width - 1) / 2;
-        int rightX = leftWidth + 1;
-        int rightWidth = width - rightX;
-        DashboardSnapshot current = snapshot.get();
-        int storageY = contentTop + topHeight;
-        int bottomY = storageY + storageHeight;
-        drawPanel(graphics, 0, contentTop, leftWidth, topHeight, "CPU", TEAL);
-        drawPanel(graphics, rightX, contentTop, rightWidth, topHeight, "MEMORY", BLUE);
-        drawPanel(graphics, 0, storageY, width, storageHeight, "STORAGE / FILESYSTEMS", ORANGE);
-        drawPanel(graphics, 0, bottomY, leftWidth, bottomHeight, "GRAPHICS", PURPLE);
-        drawPanel(graphics, rightX, bottomY, rightWidth, bottomHeight, "SERVICES", GREEN);
-
-        if (pageError.get() != null) {
-            put(graphics, 2, 3, width - 4, "ERROR  " + pageError.get(), RED);
-        } else if (current == null) {
-            put(graphics, 2, 3, width - 4, "Connecting to system metrics...", MUTED);
-        } else {
-            drawCpu(graphics, current, 0, contentTop, leftWidth, topHeight);
-            drawMemory(graphics, current, rightX, contentTop, rightWidth, topHeight);
-            drawStorage(graphics, current, 0, storageY, width, storageHeight);
-            drawGpu(graphics, current, 0, bottomY, leftWidth, bottomHeight);
-            drawServices(graphics, current, rightX, bottomY, rightWidth, bottomHeight);
+    private static boolean isPreviousCardKey(KeyStroke key) {
+        if (key.getKeyType() == KeyType.ArrowLeft || key.getKeyType() == KeyType.ArrowUp) {
+            return true;
         }
+        return key.getKeyType() == KeyType.Character && key.getCharacter() != null
+                && Character.toLowerCase(key.getCharacter()) == 'h';
+    }
+
+    private static boolean isNextRangeKey(KeyStroke key) {
+        return key.getKeyType() == KeyType.Character && key.getCharacter() != null
+                && (key.getCharacter() == ']' || Character.toLowerCase(key.getCharacter()) == 't');
+    }
+
+    private static boolean isPreviousRangeKey(KeyStroke key) {
+        return key.getKeyType() == KeyType.Character && key.getCharacter() != null
+                && key.getCharacter() == '[';
+    }
+
+    private static boolean isNextCursorKey(KeyStroke key) {
+        return key.getKeyType() == KeyType.ArrowRight
+                || key.getKeyType() == KeyType.Character && key.getCharacter() != null
+                && Character.toLowerCase(key.getCharacter()) == 'l';
+    }
+
+    private static boolean isPreviousCursorKey(KeyStroke key) {
+        return key.getKeyType() == KeyType.ArrowLeft
+                || key.getKeyType() == KeyType.Character && key.getCharacter() != null
+                && Character.toLowerCase(key.getCharacter()) == 'h';
     }
 
     private void drawHeader(TextGraphics graphics, int width) {
@@ -408,9 +619,8 @@ public final class DashboardPage extends Page {
         }
         if (row < bottom) {
             put(graphics, x + 2, row, width - 4,
-                    "Temp " + temperature(cpu.temperatureCelsius()) + "   Load "
-                    + decimal(cpu.loadAverage1()) + "  " + decimal(cpu.loadAverage5()) + "  "
-                    + decimal(cpu.loadAverage15()) + "   " + cpu.logicalProcessors() + " threads",
+                    "Temp " + temperature(cpu.temperatureCelsius()) + "   "
+                    + cpu.logicalProcessors() + " threads",
                     MUTED);
             row++;
         }

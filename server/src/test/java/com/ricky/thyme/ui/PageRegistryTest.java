@@ -26,15 +26,15 @@ class PageRegistryTest {
     }
 
     @Test
-    void arrowsAndVimKeysMoveBetweenPages() {
+    void arrowsAndVimKeysRemainAvailableToTheActivePage() {
         PageRegistry registry = registry(3);
 
-        assertTrue(registry.handleNavigation(new KeyStroke('l', false, false)));
-        assertEquals(1, registry.activeIndex());
-        assertTrue(registry.handleNavigation(new KeyStroke(KeyType.ArrowLeft)));
+        assertFalse(registry.handleNavigation(new KeyStroke('l', false, false)));
         assertEquals(0, registry.activeIndex());
-        assertTrue(registry.handleNavigation(new KeyStroke('h', false, false)));
-        assertEquals(2, registry.activeIndex());
+        assertFalse(registry.handleNavigation(new KeyStroke(KeyType.ArrowLeft)));
+        assertEquals(0, registry.activeIndex());
+        assertFalse(registry.handleNavigation(new KeyStroke('h', false, false)));
+        assertEquals(0, registry.activeIndex());
     }
 
     @Test

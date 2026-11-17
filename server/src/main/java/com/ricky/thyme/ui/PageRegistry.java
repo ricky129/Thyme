@@ -68,22 +68,10 @@ public final class PageRegistry implements AutoCloseable {
         if (key.getKeyType() == KeyType.Tab || key.getKeyType() == KeyType.ReverseTab) {
             return move(key.getKeyType() == KeyType.ReverseTab ? -1 : 1);
         }
-        if (key.getKeyType() == KeyType.ArrowLeft) {
-            return move(-1);
-        }
-        if (key.getKeyType() == KeyType.ArrowRight) {
-            return move(1);
-        }
         if (key.getKeyType() == KeyType.Character && key.getCharacter() != null) {
             char character = key.getCharacter();
             if (character >= '1' && character <= '9') {
                 return select(character - '1');
-            }
-            if (character == 'h' || character == 'H') {
-                return move(-1);
-            }
-            if (character == 'l' || character == 'L') {
-                return move(1);
             }
         }
         return false;

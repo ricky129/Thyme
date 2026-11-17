@@ -87,7 +87,7 @@ public final class Shell {
             returnToRoot(background, previous);
             return true;
         }
-        if (registry.handleNavigation(key)) {
+        if (!registry.active().capturesGlobalNavigation() && registry.handleNavigation(key)) {
             switchToSelected(background, previous);
             return true;
         }

@@ -32,7 +32,6 @@ public final class OshiCpuProvider {
             cores.add(new CpuSnapshot.Core(i, usage, frequency));
         }
 
-        double[] loadAverages = processor.getSystemLoadAverage(3);
         previousSystemTicks = systemTicks;
         previousCoreTicks = coreTicks;
 
@@ -43,19 +42,11 @@ public final class OshiCpuProvider {
                 processor.getLogicalProcessorCount(),
                 totalUsage,
                 Double.isFinite(cpuTemperature) && cpuTemperature > 0 ? cpuTemperature : null,
-                cores,
-                loadAverage(loadAverages, 0),
-                loadAverage(loadAverages, 1),
-                loadAverage(loadAverages, 2));
+                cores);
     }
 
     private static Double percent(double fraction) {
         return Double.isFinite(fraction) && fraction >= 0 ? Math.min(100, fraction * 100) : null;
     }
 
-    private static Double loadAverage(double[] averages, int index) {
-        if (index >= averages.length || !Double.isFinite(averages[index]) || averages[index] < 0)
-            return null;
-        return averages[index];
-    }
 }

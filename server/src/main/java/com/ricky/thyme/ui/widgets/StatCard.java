@@ -48,11 +48,25 @@ public final class StatCard {
             double[] history,
             String caption,
             boolean drillable) {
+        draw(g, x, y, w, h, label, value, valueColor, history, caption, drillable, false);
+    }
+
+    /** Draws a card with an accent border when it is the current keyboard selection. */
+    public static void draw(
+            TextGraphics g,
+            int x, int y, int w, int h,
+            String label,
+            String value,
+            com.googlecode.lanterna.TextColor valueColor,
+            double[] history,
+            String caption,
+            boolean drillable,
+            boolean selected) {
 
         if (w < 4 || h < 2) return;
 
         // Border
-        Panel.draw(g, x, y, w, h, null);
+        Theme.drawPanel(g, x, y, w, h, selected ? Theme.ACCENT : Theme.HAIRLINE);
 
         int ix = Panel.interiorX(x);
         int iy = Panel.interiorY(y);

@@ -34,6 +34,11 @@ public abstract class Page implements AutoCloseable {
 
     public abstract void handleKey(KeyStroke key);
 
+    /** Whether the page currently owns keys normally routed by the shell. */
+    public boolean capturesGlobalNavigation() {
+        return false;
+    }
+
     public abstract void refresh();
 
     public abstract void render(TextGraphics graphics, TerminalSize size);

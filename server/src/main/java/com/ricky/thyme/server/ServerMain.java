@@ -10,6 +10,7 @@ import com.ricky.thyme.feature.gpu.LinuxGpuProvider;
 import com.ricky.thyme.feature.memory.OshiMemoryProvider;
 import com.ricky.thyme.feature.services.ServiceProvider;
 import com.ricky.thyme.ui.Shell;
+import com.ricky.thyme.ui.PageRegistry;
 import oshi.util.GlobalConfig;
 
 import java.io.IOException;
@@ -40,13 +41,17 @@ public final class ServerMain {
         GlobalConfig.set(GlobalConfig.OSHI_UTIL_SYS_PATH, sysRoot);
 
         var runner = new ProcessCommandRunner();
+        var diskProvider = new LinuxDiskProvider(hostRoot, sysRoot, runner);
+        var gpuProvider = new LinuxGpuProvider(runner, sysRoot);
+        var serviceProvider = new ServiceProvider(runner);
         var dashboard = new DashboardPage(
                 new OshiCpuProvider(),
                 new OshiMemoryProvider(),
-                new LinuxGpuProvider(runner, sysRoot),
-                new LinuxDiskProvider(hostRoot, sysRoot, runner),
-                new ServiceProvider(runner));
-        new Shell(dashboard, new ContainerPage(new ContainerProvider(runner))).run();
+                gpuProvider, diskProvider, serviceProvider);
+        var containers = new ContainerPage(new ContainerProvider(runner));
+        new Shell(new PageRegistry(java.util.List.of(
+                new PageRegistry.Entry("overview", dashboard),
+                new PageRegistry.Entry("containers", containers)))).run();
     }
 
     static Path configuredHostRoot(String hostRootValue) throws IOException {
