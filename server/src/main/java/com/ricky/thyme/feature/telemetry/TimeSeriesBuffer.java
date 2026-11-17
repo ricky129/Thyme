@@ -89,12 +89,18 @@ public final class TimeSeriesBuffer {
         if (ticksIn10 == SECONDS_10) {
             tier10s.append(valid10 == 0 ? Double.NaN : sum10 / valid10);
             peak10s.append(max10);
-            ticksIn10 = valid10 = 0; sum10 = 0; max10 = Double.NaN;
+            ticksIn10 = 0;
+            valid10 = 0;
+            sum10 = 0;
+            max10 = Double.NaN;
         }
         if (ticksIn60 == SECONDS_60) {
             tier60s.append(valid60 == 0 ? Double.NaN : sum60 / valid60);
             peak60s.append(max60);
-            ticksIn60 = valid60 = 0; sum60 = 0; max60 = Double.NaN;
+            ticksIn60 = 0;
+            valid60 = 0;
+            sum60 = 0;
+            max60 = Double.NaN;
         }
     }
 

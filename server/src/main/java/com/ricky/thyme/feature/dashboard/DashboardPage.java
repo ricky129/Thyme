@@ -481,11 +481,6 @@ public final class DashboardPage extends Page {
         transitions.transition(key, state, severity, message);
     }
 
-    private int serviceCount() {
-        DashboardSnapshot current = snapshot.get();
-        return current == null ? 0 : current.services().size();
-    }
-
     private static double totalDiskIo(DiskSnapshot disk) {
         if (disk == null) {
             return Double.NaN;
@@ -556,7 +551,7 @@ public final class DashboardPage extends Page {
                 && Character.toLowerCase(key.getCharacter()) == 'h';
     }
 
-    private void drawHeader(TextGraphics graphics, int width) {
+    void drawHeader(TextGraphics graphics, int width) {
         graphics.setBackgroundColor(BACKGROUND);
         put(graphics, 1, 0, width - 2, " THYME  /  SYSTEM MONITOR ", TEAL, true);
         put(graphics, Math.max(30, width - 22), 0, 20,
@@ -568,7 +563,7 @@ public final class DashboardPage extends Page {
         }
     }
 
-    private void drawFooter(TextGraphics graphics, int width, int height) {
+    void drawFooter(TextGraphics graphics, int width, int height) {
         graphics.setBackgroundColor(BACKGROUND);
         graphics.setForegroundColor(BORDER);
         graphics.drawLine(0, height - 1, width - 1, height - 1, '─');
@@ -576,7 +571,7 @@ public final class DashboardPage extends Page {
                 " d containers   •   ↑/↓ select service   •   r refresh   •   q quit ", MUTED);
     }
 
-    private static void drawPanel(
+    static void drawPanel(
             TextGraphics graphics, int x, int y, int width, int height, String title, TextColor accent) {
         if (width < 4 || height < 3) {
             return;
@@ -595,7 +590,7 @@ public final class DashboardPage extends Page {
         put(graphics, x + 2, y, width - 4, " " + title + " ", accent, true);
     }
 
-    private void drawCpu(TextGraphics graphics, DashboardSnapshot current, int x, int y, int width, int height) {
+    void drawCpu(TextGraphics graphics, DashboardSnapshot current, int x, int y, int width, int height) {
         CpuSnapshot cpu = current.cpu();
         int row = y + 1;
         if (cpu == null) {
@@ -641,7 +636,7 @@ public final class DashboardPage extends Page {
         }
     }
 
-    private void drawMemory(TextGraphics graphics, DashboardSnapshot current, int x, int y, int width, int height) {
+    void drawMemory(TextGraphics graphics, DashboardSnapshot current, int x, int y, int width, int height) {
         MemorySnapshot memory = current.memory();
         if (memory == null) {
             put(graphics, x + 2, y + 1, width - 4,
@@ -673,7 +668,7 @@ public final class DashboardPage extends Page {
         }
     }
 
-    private void drawGpu(TextGraphics graphics, DashboardSnapshot current, int x, int y, int width, int height) {
+    void drawGpu(TextGraphics graphics, DashboardSnapshot current, int x, int y, int width, int height) {
         GpuReading gpu = current.gpu();
         if (gpu == null || gpu.devices().isEmpty()) {
             put(graphics, x + 2, y + 1, width - 4, "No graphics device detected", MUTED);
@@ -715,7 +710,7 @@ public final class DashboardPage extends Page {
         }
     }
 
-    private void drawStorage(TextGraphics graphics, DashboardSnapshot current, int x, int y, int width, int height) {
+    void drawStorage(TextGraphics graphics, DashboardSnapshot current, int x, int y, int width, int height) {
         DiskSnapshot disk = current.disk();
         if (disk == null) {
             put(graphics, x + 2, y + 1, width - 4,
@@ -759,7 +754,7 @@ public final class DashboardPage extends Page {
         }
     }
 
-    private void drawServices(
+    void drawServices(
             TextGraphics graphics, DashboardSnapshot current, int x, int y, int width, int height) {
         List<ServiceSnapshot> services = current.services();
         int usableRows = Math.max(0, height - 3);
@@ -848,7 +843,7 @@ public final class DashboardPage extends Page {
         return value == null ? "n/a" : String.format("%.0f%%", value);
     }
 
-    private static String decimal(Double value) {
+    static String decimal(Double value) {
         return value == null ? "n/a" : String.format("%.2f", value);
     }
 
