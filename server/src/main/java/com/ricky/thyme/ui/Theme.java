@@ -3,6 +3,7 @@ package com.ricky.thyme.ui;
 import com.googlecode.lanterna.TextColor;
 import com.googlecode.lanterna.graphics.TextGraphics;
 import com.googlecode.lanterna.SGR;
+import java.util.Locale;
 
 /**
  * Central palette, thresholds, border characters and colour-capability
@@ -50,16 +51,21 @@ public final class Theme {
 
     /** Whether the terminal supports 24-bit (truecolor) colour. */
     public static final boolean TRUECOLOR;
+    /** Whether the terminal supports the 256-colour indexed palette. */
+    public static final boolean INDEXED_256;
     /** Whether colour output is suppressed (NO_COLOR env var is set). */
     public static final boolean NO_COLOR;
 
     static {
         NO_COLOR = System.getenv("NO_COLOR") != null;
         String colorterm = System.getenv("COLORTERM");
+        String term = System.getenv("TERM");
+        String normalizedTerm = term == null ? "" : term.toLowerCase(Locale.ROOT);
         TRUECOLOR = !NO_COLOR
-                && colorterm != null
-                && ("truecolor".equalsIgnoreCase(colorterm)
-                        || "24bit".equalsIgnoreCase(colorterm));
+                && ((colorterm != null && ("truecolor".equalsIgnoreCase(colorterm)
+                        || "24bit".equalsIgnoreCase(colorterm)))
+                        || normalizedTerm.contains("direct"));
+        INDEXED_256 = !NO_COLOR && !TRUECOLOR && normalizedTerm.contains("256color");
     }
 
     // -------------------------------------------------------------------------
@@ -76,6 +82,10 @@ public final class Theme {
     public static final TextColor INK_MUTED   = color(0x7c, 0x7c, 0x7c, TextColor.ANSI.BLACK_BRIGHT);
     public static final TextColor PRIMARY     = color(0x5b, 0x9b, 0xff, TextColor.ANSI.BLUE_BRIGHT);
     public static final TextColor SECONDARY   = color(0x4a, 0xde, 0x80, TextColor.ANSI.GREEN_BRIGHT);
+    public static final TextColor CPU_SERIES  = color(0x7d, 0xd3, 0xfc, TextColor.ANSI.CYAN_BRIGHT);
+    public static final TextColor MEMORY_SERIES = PRIMARY;
+    public static final TextColor IO_SERIES   = SECONDARY;
+    public static final TextColor SWAP_SERIES = color(0x93, 0xc5, 0xfd, TextColor.ANSI.BLUE);
     public static final TextColor WARM        = color(0xf0, 0x90, 0x48, TextColor.ANSI.YELLOW);
     public static final TextColor ACCENT      = color(0xe0, 0xa4, 0x22, TextColor.ANSI.YELLOW_BRIGHT);
     public static final TextColor GOOD        = color(0x4d, 0xb4, 0x50, TextColor.ANSI.GREEN);
@@ -245,7 +255,41 @@ public final class Theme {
     private static TextColor color(int r, int g, int b, TextColor fallback) {
         if (NO_COLOR) return TextColor.ANSI.DEFAULT;
         if (TRUECOLOR) return new TextColor.RGB(r, g, b);
+        if (INDEXED_256) return new TextColor.Indexed(nearest256(r, g, b));
         return fallback;
+    }
+
+    /** Maps an RGB colour to the nearest xterm-256 index (cube or greyscale ramp). */
+    private static int nearest256(int r, int g, int b) {
+        int[] levels = {0, 95, 135, 175, 215, 255};
+        int redIndex = nearestLevel(levels, r);
+        int greenIndex = nearestLevel(levels, g);
+        int blueIndex = nearestLevel(levels, b);
+        int cubeIndex = 16 + 36 * redIndex + 6 * greenIndex + blueIndex;
+        int cubeDistance = distance(r, g, b,
+                levels[redIndex], levels[greenIndex], levels[blueIndex]);
+        int average = (r + g + b) / 3;
+        int grayIndex = Math.max(0, Math.min(23, (average - 3) / 10));
+        int grayLevel = 8 + 10 * grayIndex;
+        int grayDistance = distance(r, g, b, grayLevel, grayLevel, grayLevel);
+        return grayDistance < cubeDistance ? 232 + grayIndex : cubeIndex;
+    }
+
+    private static int nearestLevel(int[] levels, int value) {
+        int best = 0;
+        for (int i = 1; i < levels.length; i++) {
+            if (Math.abs(levels[i] - value) < Math.abs(levels[best] - value)) {
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    private static int distance(int r, int g, int b, int rr, int gg, int bb) {
+        int dr = r - rr;
+        int dg = g - gg;
+        int db = b - bb;
+        return dr * dr + dg * dg + db * db;
     }
 
     private Theme() {}

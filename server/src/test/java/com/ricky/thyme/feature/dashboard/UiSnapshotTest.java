@@ -1,6 +1,7 @@
 package com.ricky.thyme.feature.dashboard;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.googlecode.lanterna.TerminalSize;
@@ -58,7 +59,7 @@ class UiSnapshotTest {
         for (TerminalSize size : SIZES) {
             writeSnapshot("per-core", size, (graphics, terminalSize) ->
                     DashboardOverviewRenderer.draw(graphics, terminalSize, snapshot,
-                            history(25, 18), history(68, 900), history(54, 900),
+                            history(25, 18), history(68, 900), history(5, 900), history(54, 900),
                             history(12, 900), history(3.5, 900), new EventLogBuffer(), null,
                             0, true, TimeSeriesBuffer.Range.ONE_HOUR, 17, true, true,
                             cores, 2, cursors));
@@ -68,6 +69,58 @@ class UiSnapshotTest {
         assertEquals(1, Files.readString(snapshotFile).lines()
                 .filter(line -> line.contains("history covers 18s of 1h"))
                 .count());
+    }
+
+    @Test
+    void rendersUsedAndSwapSeriesInRamDetail() throws IOException {
+        TerminalSize size = new TerminalSize(120, 35);
+        DashboardSnapshot snapshot = snapshot();
+        writeSnapshot("ram-detail", size, (graphics, terminalSize) ->
+                DashboardOverviewRenderer.draw(graphics, terminalSize, snapshot,
+                        history(42, 900), history(68, 150), history(12, 150),
+                        history(54, 900), history(12, 900), history(3.5, 900),
+                        new EventLogBuffer(), null, 1, true,
+                        TimeSeriesBuffer.Range.FIFTEEN_MINUTES, 149, false, true,
+                        List.of(), 0, new int[0]));
+        String text = Files.readString(Path.of("target", "ui-snapshots", "ram-detail-120x35.txt"));
+        assertTrue(text.contains("● used"));
+        assertTrue(text.contains("○ swap"));
+        assertTrue(text.contains("··"), "swap dots should be adjacent column by column");
+    }
+
+    @Test
+    void hidesSwapDashesWhenSwapUsageIsZero() throws IOException {
+        TerminalSize size = new TerminalSize(120, 35);
+        DashboardSnapshot snapshot = snapshot();
+        writeSnapshot("ram-detail-zero-swap", size, (graphics, terminalSize) ->
+                DashboardOverviewRenderer.draw(graphics, terminalSize, snapshot,
+                        history(42, 900), history(68, 150), flatHistory(0, 150),
+                        history(54, 900), history(12, 900), history(3.5, 900),
+                        new EventLogBuffer(), null, 1, true,
+                        TimeSeriesBuffer.Range.FIFTEEN_MINUTES, -1, false, true,
+                        List.of(), 0, new int[0]));
+        String text = Files.readString(
+                Path.of("target", "ui-snapshots", "ram-detail-zero-swap-120x35.txt"));
+        assertTrue(text.contains("○ swap"));
+        assertFalse(text.contains("·█·"), "zero swap must not draw dashed samples");
+    }
+
+    @Test
+    void drawsSwapDownToZeroBeforeHidingIt() throws IOException {
+        TerminalSize size = new TerminalSize(120, 35);
+        DashboardSnapshot snapshot = snapshot();
+        writeSnapshot("ram-detail-swap-drop", size, (graphics, terminalSize) ->
+                DashboardOverviewRenderer.draw(graphics, terminalSize, snapshot,
+                        history(42, 900), history(68, 150), swapDropHistory(150),
+                        history(54, 900), history(12, 900), history(3.5, 900),
+                        new EventLogBuffer(), null, 1, true,
+                        TimeSeriesBuffer.Range.FIFTEEN_MINUTES, -1, false, true,
+                        List.of(), 0, new int[0]));
+        String text = Files.readString(
+                Path.of("target", "ui-snapshots", "ram-detail-swap-drop-120x35.txt"));
+        assertTrue(text.contains("··"), "swap line should be drawn while in use");
+        assertTrue(text.lines().anyMatch(line -> line.contains("0%") && line.contains("·")),
+                "swap line should reach the zero baseline before disappearing");
     }
 
     private static DashboardSnapshot snapshot() {
@@ -93,6 +146,22 @@ class UiSnapshotTest {
         TimeSeriesBuffer history = new TimeSeriesBuffer();
         for (int i = 0; i < count; i++) {
             history.append(i % 37 == 0 ? Double.NaN : value + (i % 5));
+        }
+        return history;
+    }
+
+    private static TimeSeriesBuffer flatHistory(double value, int count) {
+        TimeSeriesBuffer history = new TimeSeriesBuffer();
+        for (int i = 0; i < count; i++) {
+            history.append(value);
+        }
+        return history;
+    }
+
+    private static TimeSeriesBuffer swapDropHistory(int count) {
+        TimeSeriesBuffer history = new TimeSeriesBuffer();
+        for (int i = 0; i < count; i++) {
+            history.append(i < count - 30 ? 40.0 : 0.0);
         }
         return history;
     }

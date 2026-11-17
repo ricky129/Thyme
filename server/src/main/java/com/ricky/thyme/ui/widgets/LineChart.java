@@ -3,6 +3,7 @@ package com.ricky.thyme.ui.widgets;
 import com.googlecode.lanterna.TextColor;
 import com.googlecode.lanterna.graphics.TextGraphics;
 import com.ricky.thyme.ui.Theme;
+import java.util.List;
 
 /**
  * A line chart widget drawn with Unicode block elements (or braille when
@@ -21,6 +22,9 @@ import com.ricky.thyme.ui.Theme;
  * <p>This widget is <em>render-only</em> and holds no domain state.
  */
 public final class LineChart {
+
+    /** A render-only series for a multi-line chart. Dashed series draw a dotted line. */
+    public record Series(String label, double[] samples, TextColor color, boolean dashed) { }
 
     private static final int Y_AXIS_WIDTH = 5; // "100% " or " n/a "
     private static final int X_AXIS_HEIGHT = 1;
@@ -86,6 +90,39 @@ public final class LineChart {
         for (int col = plotX; col < plotX + plotW; col++) {
             g.putString(col, xAxisY, "─");
         }
+    }
+
+    /** Draws multiple series sharing one axis and one crosshair. */
+    public static void drawMulti(TextGraphics g, int x, int y, int w, int h,
+            String title, String unit, List<Series> series, double maxValue,
+            int cursorIndex, String coverageNote, boolean braille) {
+        if (w < 8 || h < 4 || series == null || series.isEmpty()) return;
+        int plotX = x + Y_AXIS_WIDTH;
+        int plotY = y + 1;
+        int plotW = w - Y_AXIS_WIDTH;
+        int plotH = h - 1 - X_AXIS_HEIGHT;
+        if (plotW < 2 || plotH < 1) return;
+        StringBuilder heading = new StringBuilder(title == null ? "" : title);
+        for (Series value : series) {
+            heading.append("   ").append(value.dashed() ? "○ " : "● ").append(value.label());
+        }
+        Theme.put(g, x, y, w, heading.toString(), Theme.INK, true);
+        if (coverageNote != null) {
+            int noteX = Math.max(x + heading.length() + 1, x + w - coverageNote.length());
+            Theme.put(g, noteX, y, Math.max(0, x + w - noteX), coverageNote, Theme.INK_MUTED);
+        }
+        drawYAxis(g, x, plotY, plotH, maxValue, unit);
+        for (Series value : series) {
+            if (value.dashed()) {
+                drawDashedLine(g, plotX, plotY, plotW, plotH, value.samples(), maxValue, value.color());
+            } else {
+                drawPlot(g, plotX, plotY, plotW, plotH, value.samples(), maxValue, value.color(), -1, braille);
+            }
+        }
+        drawCrosshair(g, plotX, plotY, plotW, plotH, series.get(0).samples(), cursorIndex);
+        int xAxisY = plotY + plotH;
+        g.setForegroundColor(Theme.BASELINE);
+        for (int col = plotX; col < plotX + plotW; col++) g.putString(col, xAxisY, "─");
     }
 
     // -------------------------------------------------------------------------
@@ -154,14 +191,42 @@ public final class LineChart {
         if (cursorIndex >= 0 && samples.length > 0) {
             int clampedCursor = Math.max(0, Math.min(samples.length - 1, cursorIndex));
             // Map logical cursor to screen column
-            int screenCol = w - (samples.length - clampedCursor);
-            if (screenCol >= 0 && screenCol < w) {
-                g.setForegroundColor(Theme.ACCENT);
-                for (int row = y; row < y + h; row++) {
-                    g.putString(x + screenCol, row, "│");
-                }
-            }
+            drawCrosshair(g, x, y, w, h, samples, clampedCursor);
         }
+    }
+
+    private static void drawDashedLine(TextGraphics g, int x, int y, int w, int h,
+            double[] samples, double maxValue, TextColor color) {
+        if (samples == null || samples.length == 0 || maxValue <= 0) return;
+        int start = Math.max(0, samples.length - w);
+        g.setForegroundColor(color);
+        for (int col = 0; col < w; col++) {
+            int si = start + col;
+            if (si >= samples.length) break;
+            double value = samples[si];
+            if (Double.isNaN(value)) continue;
+            boolean positive = value > 0;
+            boolean touchesPositive = hasPositiveSample(samples, si - 1)
+                    || hasPositiveSample(samples, si + 1);
+            if (!positive && !touchesPositive) continue;
+            int filledRows = Math.max(1, (int) Math.round(value / maxValue * h));
+            int screenCol = samples.length < w ? w - samples.length + si : col;
+            g.putString(x + screenCol, y + h - filledRows, "·");
+        }
+    }
+
+    /** Whether the sample at {@code index} is present and above zero. */
+    private static boolean hasPositiveSample(double[] samples, int index) {
+        return index >= 0 && index < samples.length && samples[index] > 0;
+    }
+
+    private static void drawCrosshair(TextGraphics g, int x, int y, int w, int h, double[] samples, int cursor) {
+        if (samples == null || samples.length == 0 || cursor < 0) return;
+        int clamped = Math.max(0, Math.min(samples.length - 1, cursor));
+        int screenCol = w - (samples.length - clamped);
+        if (screenCol < 0 || screenCol >= w) return;
+        g.setForegroundColor(Theme.ACCENT);
+        for (int row = y; row < y + h; row++) g.putString(x + screenCol, row, "│");
     }
 
     private static void drawBlockColumn(

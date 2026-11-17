@@ -78,6 +78,16 @@ public final class DashboardOverviewRenderer {
             TimeSeriesBuffer temperatureHistory, TimeSeriesBuffer gpuHistory,
             TimeSeriesBuffer diskIoHistory,
             EventLogBuffer eventLog, String error, int selectedCard, boolean details) {
+        draw(graphics, size, snapshot, cpuHistory, memoryHistory, new TimeSeriesBuffer(),
+                temperatureHistory, gpuHistory, diskIoHistory, eventLog, error, selectedCard, details);
+    }
+
+    /** Draws the overview/detail with an explicit swap history. */
+    public static void draw(TextGraphics graphics, TerminalSize size, DashboardSnapshot snapshot,
+            TimeSeriesBuffer cpuHistory, TimeSeriesBuffer memoryHistory, TimeSeriesBuffer swapHistory,
+            TimeSeriesBuffer temperatureHistory, TimeSeriesBuffer gpuHistory,
+            TimeSeriesBuffer diskIoHistory,
+            EventLogBuffer eventLog, String error, int selectedCard, boolean details) {
         int width = size.getColumns();
         int height = size.getRows();
         graphics.setBackgroundColor(Theme.PAGE);
@@ -96,7 +106,7 @@ public final class DashboardOverviewRenderer {
             drawOverview(graphics, size, snapshot, cpuHistory, memoryHistory,
                     temperatureHistory, gpuHistory, diskIoHistory, eventLog, error, selectedCard);
             drawDetail(graphics, width, footerY - 2, snapshot, cpuHistory, memoryHistory,
-                    temperatureHistory, gpuHistory, diskIoHistory, selectedCard,
+                    swapHistory, temperatureHistory, gpuHistory, diskIoHistory, selectedCard,
                     TimeSeriesBuffer.Range.FIFTEEN_MINUTES, -1, false, true, List.of(), 0, new int[0]);
             return;
         }
@@ -147,7 +157,7 @@ public final class DashboardOverviewRenderer {
             TimeSeriesBuffer diskIoHistory,
             EventLogBuffer eventLog, String error, int selectedCard, boolean details,
             TimeSeriesBuffer.Range range, int cursor, boolean perCore, boolean explainer) {
-        draw(graphics, size, snapshot, cpuHistory, memoryHistory, temperatureHistory, gpuHistory,
+        draw(graphics, size, snapshot, cpuHistory, memoryHistory, new TimeSeriesBuffer(), temperatureHistory, gpuHistory,
                 diskIoHistory, eventLog, error, selectedCard, details, range, cursor, perCore,
                 explainer, List.of(), 0, new int[0]);
     }
@@ -156,7 +166,7 @@ public final class DashboardOverviewRenderer {
      * Draws the overview and detail overlay with per-core CPU histories.
      */
     public static void draw(TextGraphics graphics, TerminalSize size, DashboardSnapshot snapshot,
-            TimeSeriesBuffer cpuHistory, TimeSeriesBuffer memoryHistory,
+            TimeSeriesBuffer cpuHistory, TimeSeriesBuffer memoryHistory, TimeSeriesBuffer swapHistory,
             TimeSeriesBuffer temperatureHistory, TimeSeriesBuffer gpuHistory,
             TimeSeriesBuffer diskIoHistory, EventLogBuffer eventLog, String error,
             int selectedCard, boolean details, TimeSeriesBuffer.Range range, int cursor,
@@ -164,6 +174,7 @@ public final class DashboardOverviewRenderer {
             int selectedCore, int[] coreCursors) {
         cpuHistory = safeHistory(cpuHistory);
         memoryHistory = safeHistory(memoryHistory);
+        swapHistory = safeHistory(swapHistory);
         temperatureHistory = safeHistory(temperatureHistory);
         gpuHistory = safeHistory(gpuHistory);
         diskIoHistory = safeHistory(diskIoHistory);
@@ -184,7 +195,7 @@ public final class DashboardOverviewRenderer {
                 temperatureHistory, gpuHistory, diskIoHistory, eventLog, error, selectedCard);
         if (details) {
             drawDetail(graphics, width, height - 3, snapshot, cpuHistory, memoryHistory,
-                    temperatureHistory, gpuHistory, diskIoHistory, selectedCard,
+                    swapHistory, temperatureHistory, gpuHistory, diskIoHistory, selectedCard,
                     range, cursor, perCore, explainer, coreHistories, selectedCore, coreCursors);
         }
     }
@@ -195,7 +206,8 @@ public final class DashboardOverviewRenderer {
 
     private static void drawDetail(TextGraphics graphics, int width, int height,
             DashboardSnapshot snapshot, TimeSeriesBuffer cpuHistory,
-            TimeSeriesBuffer memoryHistory, TimeSeriesBuffer temperatureHistory, TimeSeriesBuffer gpuHistory,
+            TimeSeriesBuffer memoryHistory, TimeSeriesBuffer swapHistory,
+            TimeSeriesBuffer temperatureHistory, TimeSeriesBuffer gpuHistory,
             TimeSeriesBuffer diskIoHistory, int selectedCard,
             TimeSeriesBuffer.Range range, int cursor, boolean perCore, boolean explainer,
             List<TimeSeriesBuffer> coreHistories, int selectedCore, int[] coreCursors) {
@@ -256,12 +268,25 @@ public final class DashboardOverviewRenderer {
         if (history == null) {
             Theme.put(graphics, innerX, chartY, innerW, "history unavailable for this metric", Theme.INK_MUTED);
         } else {
-            LineChart.draw(graphics, x + 1, chartY, overlayWidth - 2, chartHeight, label,
-                    chartUnit(selectedCard), samples, max, Theme.PRIMARY, cursor,
-                    history.coverageNote(range), false);
+            double[] swapSamples = selectedCard == 1 ? swapHistory.samples(range) : new double[0];
+            if (selectedCard == 1) {
+                LineChart.drawMulti(graphics, x + 1, chartY, overlayWidth - 2, chartHeight, label,
+                        chartUnit(selectedCard), List.of(
+                                new LineChart.Series("used", samples, Theme.MEMORY_SERIES, false),
+                                new LineChart.Series("swap", swapSamples, Theme.SWAP_SERIES, true)),
+                        max, cursor, history.coverageNote(range), false);
+            } else {
+                LineChart.draw(graphics, x + 1, chartY, overlayWidth - 2, chartHeight, label,
+                        chartUnit(selectedCard), samples, max, seriesColor(selectedCard), cursor,
+                        history.coverageNote(range), false);
+            }
             if (cursor >= 0 && cursor < samples.length && !Double.isNaN(samples[cursor])) {
-                Theme.put(graphics, innerX, chartY + chartHeight, innerW,
-                        "▸ cursor " + formatMetric(samples[cursor], selectedCard), Theme.ACCENT);
+                String readout = "▸ cursor " + formatMetric(samples[cursor], selectedCard);
+                if (selectedCard == 1 && cursor < swapSamples.length
+                        && !Double.isNaN(swapSamples[cursor])) {
+                    readout = readout + "   swap " + formatMetric(swapSamples[cursor], 1);
+                }
+                Theme.put(graphics, innerX, chartY + chartHeight, innerW, readout, Theme.ACCENT);
             }
         }
         int detailY = chartY + chartHeight + 1;
@@ -317,7 +342,7 @@ public final class DashboardOverviewRenderer {
                 String title = "C" + index + (index == selectedCore ? "*" : " ");
                 Theme.put(graphics, x, y + index, 3, title, Theme.INK_SECONDARY);
                 Sparkline.draw(graphics, x + 3, y + index, Math.max(1, width - 3),
-                        histories.get(index).samples(range), Theme.PRIMARY, false);
+                        histories.get(index).samples(range), Theme.CPU_SERIES, false);
             }
             return;
         }
@@ -335,12 +360,12 @@ public final class DashboardOverviewRenderer {
             String title = "Core " + index + (index == selectedCore ? " *" : "");
             if (actualHeight >= 6) {
                 LineChart.draw(graphics, cellX, cellY, actualWidth, actualHeight, title, "%",
-                        samples, 100, Theme.PRIMARY, cursor,
+                        samples, 100, Theme.CPU_SERIES, cursor,
                         null, false);
             } else {
                 Panel.draw(graphics, cellX, cellY, actualWidth, actualHeight, title);
                 Sparkline.draw(graphics, cellX + 1, cellY + 1, actualWidth - 2,
-                        samples, Theme.PRIMARY, false);
+                        samples, Theme.CPU_SERIES, false);
             }
         }
     }
@@ -467,7 +492,7 @@ public final class DashboardOverviewRenderer {
         } else {
             LineChart.draw(graphics, 1, chartY + 1, width - 2, chartHeight - 2,
                     "CPU / RAM", "%", cpuHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES),
-                    100, Theme.PRIMARY, -1, cpuHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), false);
+                    100, Theme.CPU_SERIES, -1, cpuHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), false);
         }
     }
 
@@ -492,7 +517,8 @@ public final class DashboardOverviewRenderer {
             int cardY = y + row * (height / 2 + 1);
             StatCard.draw(graphics, x, cardY, cardWidth, width >= 120 ? height : height / 2,
                     labels[i], values[i], cardColor(labels[i], snapshot), history[i],
-                    i < 3 ? "current" : "latest sample", true, i == selectedCard);
+                    i < 3 ? "current" : "latest sample", true, i == selectedCard,
+                    cardSparkColor(labels[i]));
         }
     }
 
@@ -507,7 +533,7 @@ public final class DashboardOverviewRenderer {
         } else {
             LineChart.draw(graphics, x + 1, y + 1, width - 2, firstHeight - 2, "CPU", "%",
                     cpuHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), 100,
-                    Theme.PRIMARY, -1, cpuHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), false);
+                    Theme.CPU_SERIES, -1, cpuHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), false);
         }
         int secondY = y + firstHeight + 1;
         int secondHeight = height - firstHeight - 1;
@@ -515,7 +541,7 @@ public final class DashboardOverviewRenderer {
             Panel.draw(graphics, x, secondY, width, secondHeight, "RAM • 15M");
             LineChart.draw(graphics, x + 1, secondY + 1, width - 2, secondHeight - 2, "RAM", "%",
                     memoryHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), 100,
-                    Theme.SECONDARY, -1, memoryHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), false);
+                    Theme.MEMORY_SERIES, -1, memoryHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), false);
         }
     }
 
@@ -536,6 +562,15 @@ public final class DashboardOverviewRenderer {
                 "M/s";
             default ->
                 "%";
+        };
+    }
+
+    private static TextColor seriesColor(int selectedCard) {
+        return switch (selectedCard) {
+            case 0 -> Theme.CPU_SERIES;
+            case 1 -> Theme.MEMORY_SERIES;
+            case 4 -> Theme.IO_SERIES;
+            default -> Theme.PRIMARY;
         };
     }
 
@@ -572,6 +607,15 @@ public final class DashboardOverviewRenderer {
         }
         CpuSnapshot cpu = snapshot == null ? null : snapshot.cpu();
         return "CPU".equals(label) ? Theme.utilizationColor(cpu == null ? null : cpu.totalUsagePercent()) : Theme.INK;
+    }
+
+    private static TextColor cardSparkColor(String label) {
+        return switch (label) {
+            case "CPU" -> Theme.CPU_SERIES;
+            case "RAM" -> Theme.MEMORY_SERIES;
+            case "Disk I/O" -> Theme.IO_SERIES;
+            default -> Theme.INK_SECONDARY;
+        };
     }
 
     private static TextColor healthColor(DashboardSnapshot snapshot) {

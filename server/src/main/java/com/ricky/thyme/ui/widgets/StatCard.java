@@ -62,6 +62,22 @@ public final class StatCard {
             String caption,
             boolean drillable,
             boolean selected) {
+        draw(g, x, y, w, h, label, value, valueColor, history, caption, drillable, selected,
+                Theme.PRIMARY);
+    }
+
+    /** Draws a card with an explicit sparkline colour. */
+    public static void draw(
+            TextGraphics g,
+            int x, int y, int w, int h,
+            String label,
+            String value,
+            com.googlecode.lanterna.TextColor valueColor,
+            double[] history,
+            String caption,
+            boolean drillable,
+            boolean selected,
+            com.googlecode.lanterna.TextColor sparkColor) {
 
         if (w < 4 || h < 2) return;
 
@@ -84,7 +100,7 @@ public final class StatCard {
         int sparkWidth = iw - labelLen - 1;
         if (sparkWidth > 1 && history != null && history.length > 0) {
             String spark = buildSparkline(history, sparkWidth);
-            Theme.put(g, ix + labelLen + 1, iy, sparkWidth, spark, Theme.PRIMARY);
+            Theme.put(g, ix + labelLen + 1, iy, sparkWidth, spark, sparkColor);
         }
 
         // Row 1: value (large)

@@ -65,6 +65,7 @@ public final class DashboardPage extends Page {
     private final AtomicReference<DashboardSnapshot> snapshot = new AtomicReference<>();
     private final TimeSeriesBuffer cpuHistory = new TimeSeriesBuffer();
     private final TimeSeriesBuffer memoryHistory = new TimeSeriesBuffer();
+    private final TimeSeriesBuffer swapHistory = new TimeSeriesBuffer();
     private final TimeSeriesBuffer temperatureHistory = new TimeSeriesBuffer();
     private final TimeSeriesBuffer gpuHistory = new TimeSeriesBuffer();
     private final TimeSeriesBuffer diskIoHistory = new TimeSeriesBuffer();
@@ -320,6 +321,8 @@ public final class DashboardPage extends Page {
         memoryHistory.append(memory == null
                 ? Double.NaN
                 : ratio(memory.usedBytes(), memory.totalBytes()));
+        swapHistory.append(memory == null || memory.swapTotalBytes() <= 0
+                ? Double.NaN : ratio(memory.swapUsedBytes(), memory.swapTotalBytes()));
         diskIoHistory.append(totalDiskIo(disk));
         if (disk != null) {
             for (DiskSnapshot.Filesystem fs : disk.filesystems()) {
@@ -507,7 +510,7 @@ public final class DashboardPage extends Page {
     @Override
     public void render(TextGraphics graphics, TerminalSize size) {
         DashboardOverviewRenderer.draw(graphics, size, snapshot.get(), cpuHistory, memoryHistory,
-                temperatureHistory, gpuHistory, diskIoHistory,
+                swapHistory, temperatureHistory, gpuHistory, diskIoHistory,
                 eventLog, pageError.get(), selectedCard.get(), details.get(), detailRange.get(),
                 detailCursor(), perCore.get(), explainer.get(), coreHistories.get(), selectedCore.get(),
                 coreCursors.get().stream().mapToInt(AtomicInteger::get).toArray());
