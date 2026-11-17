@@ -117,6 +117,41 @@ fail_jdk_check() {
     exit 1
 }
 
+jdk_version() {
+    local home=$1 output version
+    output=$("$home/bin/java" -XshowSettings:properties -version 2>&1) || return 1
+    version=$(printf '%s\n' "$output" |
+        sed -n 's/^[[:space:]]*java.specification.version = //p')
+    [[ "$version" =~ ^[0-9]+$ ]] || return 1
+    printf '%s\n' "$version"
+}
+
+jdk_is_usable() {
+    local home=${1%/} tool version
+    [[ -n "$home" && -d "$home" ]] || return 1
+    for tool in java javac jlink; do
+        [[ -x "$home/bin/$tool" ]] || return 1
+    done
+    [[ -d "$home/jmods" ]] || return 1
+    version=$(jdk_version "$home") || return 1
+    (( version >= 25 ))
+}
+
+if ! jdk_is_usable "${JAVA_HOME:-}"; then
+    detected_jdk=''
+    while IFS= read -r candidate; do
+        if jdk_is_usable "$candidate"; then
+            detected_jdk=${candidate%/}
+            break
+        fi
+    done < <(printf '%s\n' /usr/lib/jvm/*/ | sort -rV)
+    if [[ -n "$detected_jdk" ]]; then
+        printf '==> JAVA_HOME=%s is not a complete JDK 25+; using %s.\n' \
+            "${JAVA_HOME:-<unset>}" "$detected_jdk"
+        export JAVA_HOME=$detected_jdk
+    fi
+fi
+
 if [[ -z "${JAVA_HOME:-}" ]]; then
     fail_jdk_check 'JAVA_HOME is not set.'
 fi
@@ -152,27 +187,72 @@ if ! ssh "${SSH_OPTS[@]}" "$TARGET" \
 fi
 
 printf '==> Building the client and server runtime...\n'
-PATH="$JAVA_HOME/bin:$PATH" "$SCRIPT_DIR/mvnw" -q -f "$SCRIPT_DIR/pom.xml" verify
+PATH="$JAVA_HOME/bin:$PATH" "$SCRIPT_DIR/mvnw" -f "$SCRIPT_DIR/pom.xml" verify
 
 printf '==> Preparing the remote directory...\n'
 REMOTE_SHELL_DIR="${REMOTE_DIR/#\~/\$HOME}"
 ssh "${SSH_OPTS[@]}" "$TARGET" "mkdir -p \"$REMOTE_SHELL_DIR\""
 
-printf '==> Making the existing server runtime writable...\n'
-if ! ssh "${SSH_OPTS[@]}" "$TARGET" \
-    "sh -c 'if [ -d \"$REMOTE_SHELL_DIR/thyme-server-runtime\" ]; then chmod -R u+w \"$REMOTE_SHELL_DIR/thyme-server-runtime\"; fi'"; then
-    printf 'Error: could not make the existing server runtime writable.\n' >&2
+printf '==> Creating a remote staging directory...\n'
+REMOTE_STAGING_DIR=$(ssh "${SSH_OPTS[@]}" "$TARGET" \
+    "mktemp -d \"$REMOTE_SHELL_DIR/.thyme-server-runtime.XXXXXX\"")
+REMOTE_RUNTIME_STAGING="$REMOTE_STAGING_DIR/thyme-server-runtime"
+REMOTE_RUNTIME="$REMOTE_SHELL_DIR/thyme-server-runtime"
+REMOTE_RUNTIME_BACKUP="$REMOTE_SHELL_DIR/.thyme-server-runtime.previous.$RANDOM"
+
+cleanup_remote_staging() {
+    if [[ -n "${REMOTE_STAGING_DIR:-}" ]]; then
+        ssh "${SSH_OPTS[@]}" "$TARGET" "rm -rf -- \"$REMOTE_STAGING_DIR\"" >/dev/null 2>&1 || true
+    fi
+}
+trap cleanup_remote_staging EXIT
+
+printf '==> Transferring the server runtime to staging...\n'
+if ! scp "${SCP_OPTS[@]}" -r \
+    "$SCRIPT_DIR/server/target/thyme-server-runtime" \
+    "$TARGET:$REMOTE_STAGING_DIR/"; then
+    printf 'Error: could not transfer the server runtime to the remote staging directory.\n' >&2
     exit 1
 fi
 
-printf '==> Transferring the server runtime...\n'
-scp "${SCP_OPTS[@]}" -r \
-    "$SCRIPT_DIR/server/target/thyme-server-runtime" \
-    "$TARGET:$REMOTE_DIR/"
+printf '==> Verifying the staged server runtime...\n'
+if ! ssh "${SSH_OPTS[@]}" "$TARGET" \
+    "test -x \"$REMOTE_RUNTIME_STAGING/bin/java\""; then
+    printf 'Error: staged server runtime is incomplete: bin/java is missing or not executable.\n' >&2
+    exit 1
+fi
+
+printf '==> Activating the new server runtime...\n'
+if ! ssh "${SSH_OPTS[@]}" "$TARGET" "sh -c '
+    set -eu
+    moved_old=0
+    rollback() {
+        if [ \"\$moved_old\" -eq 1 ] && [ ! -e \"$REMOTE_RUNTIME\" ] && [ ! -L \"$REMOTE_RUNTIME\" ]; then
+            mv -- \"$REMOTE_RUNTIME_BACKUP\" \"$REMOTE_RUNTIME\"
+        fi
+    }
+    trap rollback EXIT
+    if [ -e \"$REMOTE_RUNTIME_BACKUP\" ] || [ -L \"$REMOTE_RUNTIME_BACKUP\" ]; then
+        rm -rf -- \"$REMOTE_RUNTIME_BACKUP\"
+    fi
+    if [ -e \"$REMOTE_RUNTIME\" ] || [ -L \"$REMOTE_RUNTIME\" ]; then
+        mv -- \"$REMOTE_RUNTIME\" \"$REMOTE_RUNTIME_BACKUP\"
+        moved_old=1
+    fi
+    mv -- \"$REMOTE_RUNTIME_STAGING\" \"$REMOTE_RUNTIME\"
+    trap - EXIT
+    rm -rf -- \"$REMOTE_RUNTIME_BACKUP\" || true
+'"; then
+    printf 'Error: could not activate the staged server runtime.\n' >&2
+    exit 1
+fi
+
+REMOTE_STAGING_DIR=''
+trap - EXIT
 
 printf '==> Verifying the server runtime...\n'
 ssh "${SSH_OPTS[@]}" "$TARGET" \
-    "test -x \"$REMOTE_SHELL_DIR/thyme-server-runtime/bin/java\""
+    "test -x \"$REMOTE_RUNTIME/bin/java\""
 
 printf '==> Installing the local client...\n'
 install -d "$HOME/.local/bin" "$HOME/.local/lib/thyme"
