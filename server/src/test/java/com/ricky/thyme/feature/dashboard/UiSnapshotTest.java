@@ -9,6 +9,7 @@ import com.googlecode.lanterna.screen.Screen;
 import com.googlecode.lanterna.screen.TerminalScreen;
 import com.googlecode.lanterna.terminal.virtual.DefaultVirtualTerminal;
 import com.ricky.thyme.feature.cpu.CpuSnapshot;
+import com.ricky.thyme.feature.disk.DiskSnapshot;
 import com.ricky.thyme.feature.memory.MemorySnapshot;
 import com.ricky.thyme.feature.telemetry.EventLogBuffer;
 import com.ricky.thyme.feature.telemetry.TimeSeriesBuffer;
@@ -123,12 +124,106 @@ class UiSnapshotTest {
                 "swap line should reach the zero baseline before disappearing");
     }
 
+    @Test
+    void writesFilesystemOverviewAndDiskGridSnapshots() throws IOException {
+        DashboardSnapshot snapshot = snapshotWithFilesystems();
+        List<FilesystemSeries> filesystems = filesystemSeries(snapshot);
+        TimeSeriesBuffer cpu = history(42, 900);
+        TimeSeriesBuffer memory = history(68, 900);
+        TimeSeriesBuffer temperature = history(54, 900);
+        TimeSeriesBuffer gpu = history(12, 900);
+        TimeSeriesBuffer disk = history(3.5, 900);
+        TimeSeriesBuffer swap = history(5, 900);
+        for (TerminalSize size : SIZES) {
+            writeSnapshot("filesystem-overview", size, (graphics, terminalSize) ->
+                    DashboardOverviewRenderer.draw(graphics, terminalSize, snapshot, cpu, memory,
+                            swap, temperature, gpu, disk, new EventLogBuffer(), null, 0, false,
+                            TimeSeriesBuffer.Range.FIFTEEN_MINUTES, -1, false, true,
+                            List.<TimeSeriesBuffer>of(), 0, new int[0], filesystems, 0));
+            writeSnapshot("disk-detail", size, (graphics, terminalSize) ->
+                    DashboardOverviewRenderer.draw(graphics, terminalSize, snapshot, cpu, memory,
+                            swap, temperature, gpu, disk, new EventLogBuffer(), null,
+                            OverviewCard.SYSTEM_CARD_COUNT + 1, true,
+                            TimeSeriesBuffer.Range.FIFTEEN_MINUTES, 898, false, true,
+                            List.<TimeSeriesBuffer>of(), 0, new int[0], filesystems, 1));
+        }
+        String overview = Files.readString(
+                Path.of("target", "ui-snapshots", "filesystem-overview-120x35.txt"));
+        assertTrue(overview.contains("/home"));
+        assertTrue(overview.contains("/media/usb"));
+        String detail = Files.readString(
+                Path.of("target", "ui-snapshots", "disk-detail-120x35.txt"));
+        assertTrue(detail.contains("Disk I/O"));
+        assertTrue(detail.contains("↑↓ filesystem"));
+        assertTrue(detail.contains("/"));
+    }
+
+    @Test
+    void keepsSingleDiskTotalCardWhenNoFilesystemsExist() throws IOException {
+        TerminalSize size = new TerminalSize(120, 35);
+        writeSnapshot("disk-total-fallback", size, (graphics, terminalSize) ->
+                DashboardOverviewRenderer.draw(graphics, terminalSize, snapshot(),
+                        history(42, 900), history(68, 900), history(54, 900), history(12, 900),
+                        history(3.5, 900), new EventLogBuffer(), null, 0, false));
+        String text = Files.readString(
+                Path.of("target", "ui-snapshots", "disk-total-fallback-120x35.txt"));
+        assertTrue(text.contains("Disk I/O"));
+        assertEquals(1, occurrences(text, "Disk I/O"));
+    }
+
     private static DashboardSnapshot snapshot() {
         CpuSnapshot cpu = new CpuSnapshot("fixture cpu", "x86_64", 1, 42.0, 54.0,
                 List.of(new CpuSnapshot.Core(0, 42.0, 2_000_000_000L)));
         return new DashboardSnapshot(Instant.parse("2026-01-01T12:00:00Z"), cpu,
                 new MemorySnapshot(68L * 1024 * 1024 * 1024, 16L * 1024 * 1024 * 1024,
                         1L * 1024 * 1024 * 1024, 0), null, null, List.of(), Map.of());
+    }
+
+    private static DashboardSnapshot snapshotWithFilesystems() {
+        List<DiskSnapshot.Filesystem> filesystems = List.of(
+                filesystem("/", "ext4", "/dev/nvme0n1p2", 120, 480, 1.2, 0.8, 12.0),
+                filesystem("/home", "ext4", "/dev/nvme0n1p3", 210, 720, 2.4, 0.4, 18.0),
+                filesystem("/media/usb", "vfat", "/dev/sda1", 8, 32, 0.1, 0.2, 1.0));
+        DiskSnapshot disk = new DiskSnapshot(
+                List.of(new DiskSnapshot.Device("nvme0n1", 1_000L * 1024 * 1024 * 1024,
+                        3.7 * 1024 * 1024, 1.4 * 1024 * 1024, 10.0, 20.0, 24.0, 0.2, 0.4)),
+                filesystems);
+        CpuSnapshot cpu = new CpuSnapshot("fixture cpu", "x86_64", 1, 42.0, 54.0,
+                List.of(new CpuSnapshot.Core(0, 42.0, 2_000_000_000L)));
+        return new DashboardSnapshot(Instant.parse("2026-01-01T12:00:00Z"), cpu,
+                new MemorySnapshot(68L * 1024 * 1024 * 1024, 16L * 1024 * 1024 * 1024,
+                        1L * 1024 * 1024 * 1024, 0), null, disk, List.of(), Map.of());
+    }
+
+    private static DiskSnapshot.Filesystem filesystem(String mountPoint, String type, String source,
+            long usedGib, long totalGib, double readMib, double writeMib, double utilization) {
+        long total = totalGib * 1024 * 1024 * 1024;
+        long used = usedGib * 1024 * 1024 * 1024;
+        return new DiskSnapshot.Filesystem(source, mountPoint, type, total, total - used, used,
+                List.of(source.replace("/dev/", "")), readMib * 1024 * 1024,
+                writeMib * 1024 * 1024, utilization, 0.2, 0.3);
+    }
+
+    private static List<FilesystemSeries> filesystemSeries(DashboardSnapshot snapshot) {
+        List<FilesystemSeries> series = new java.util.ArrayList<>();
+        for (DiskSnapshot.Filesystem filesystem : snapshot.disk().filesystems()) {
+            series.add(FilesystemSeries.from(filesystem,
+                    history(filesystem.readBytesPerSecond() / (1024 * 1024), 900),
+                    history(filesystem.writeBytesPerSecond() / (1024 * 1024), 900)));
+        }
+        return List.copyOf(series);
+    }
+
+    private static int occurrences(String text, String value) {
+        int count = 0;
+        int offset = 0;
+        int next = text.indexOf(value, offset);
+        while (next >= 0) {
+            count++;
+            offset = next + value.length();
+            next = text.indexOf(value, offset);
+        }
+        return count;
     }
 
     private static DashboardSnapshot snapshotWithCores() {

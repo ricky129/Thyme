@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.googlecode.lanterna.input.KeyStroke;
 import com.googlecode.lanterna.input.KeyType;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class DashboardPageTest {
@@ -58,5 +60,49 @@ class DashboardPageTest {
         assertEquals(false, page.capturesGlobalNavigation());
         page.handleKey(new KeyStroke(KeyType.Enter));
         assertEquals(true, page.capturesGlobalNavigation());
+    }
+
+    @Test
+    void selectsFilesystemCardsAndMovesInsideTheDiskGrid() {
+        DashboardPage page = new DashboardPage(null, null, null, null, null);
+        page.updateSnapshot(null, null, null, diskWithFilesystems(), null, Map.of());
+
+        for (int index = 0; index < 5; index++) {
+            page.handleKey(new KeyStroke(KeyType.ArrowRight));
+        }
+        assertEquals(5, page.selectedCard());
+
+        page.handleKey(new KeyStroke(KeyType.Enter));
+        assertEquals(true, page.showingDetails());
+        assertEquals(1, page.selectedFilesystem());
+
+        page.handleKey(new KeyStroke(KeyType.ArrowDown));
+        page.handleKey(new KeyStroke(KeyType.ArrowDown));
+        assertEquals(2, page.selectedFilesystem());
+
+        page.handleKey(new KeyStroke(KeyType.Escape));
+        assertEquals(6, page.selectedCard());
+    }
+
+    @Test
+    void clampsCardSelectionToTheFilesystemCardCount() {
+        DashboardPage page = new DashboardPage(null, null, null, null, null);
+        page.updateSnapshot(null, null, null, diskWithFilesystems(), null, Map.of());
+
+        for (int index = 0; index < 20; index++) {
+            page.handleKey(new KeyStroke(KeyType.ArrowRight));
+        }
+
+        assertEquals(OverviewCard.SYSTEM_CARD_COUNT + 2, page.selectedCard());
+    }
+
+    private static com.ricky.thyme.feature.disk.DiskSnapshot diskWithFilesystems() {
+        return new com.ricky.thyme.feature.disk.DiskSnapshot(List.of(), List.of(
+                filesystem("/"), filesystem("/home"), filesystem("/media/usb")));
+    }
+
+    private static com.ricky.thyme.feature.disk.DiskSnapshot.Filesystem filesystem(String mountPoint) {
+        return new com.ricky.thyme.feature.disk.DiskSnapshot.Filesystem("/dev/sda1", mountPoint, "ext4",
+                100, 60, 40, List.of("sda1"), 0.0, 0.0, 0.0, 0.0, 0.0);
     }
 }
