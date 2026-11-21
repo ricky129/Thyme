@@ -181,7 +181,8 @@ public final class LinuxDiskProvider implements DiskProvider {
             String source = unescapeMountField(fields[0]);
             String mountPoint = unescapeMountField(fields[1]);
             String type = unescapeMountField(fields[2]);
-            if (isPseudoFilesystem(type) || !seenMountPoints.add(mountPoint))
+            if (isPseudoFilesystem(type) || isSystemMount(mountPoint)
+                    || !seenMountPoints.add(mountPoint))
                 continue;
             Path mount = Path.of(mountPoint).normalize();
             if (!mount.isAbsolute())
@@ -332,9 +333,19 @@ public final class LinuxDiskProvider implements DiskProvider {
         return switch (type.toLowerCase(Locale.ROOT)) {
             case "proc", "sysfs", "devtmpfs", "devpts", "tmpfs", "cgroup", "cgroup2",
                     "securityfs", "debugfs", "tracefs", "configfs", "mqueue", "fusectl",
-                    "pstore", "hugetlbfs", "rpc_pipefs", "autofs", "squashfs", "overlay" -> true;
+                    "pstore", "hugetlbfs", "rpc_pipefs", "autofs", "squashfs", "overlay",
+                    "efivarfs", "bpf", "binfmt_misc", "nsfs" -> true;
             default -> false;
         };
+    }
+
+    /** Whether a mount belongs to the boot chain or kernel internals and stays out of the dashboard. */
+    static boolean isSystemMount(String mountPoint) {
+        String normalized = mountPoint.toLowerCase(Locale.ROOT);
+        return "/boot".equals(normalized) || normalized.startsWith("/boot/")
+                || "/efi".equals(normalized) || normalized.startsWith("/efi/")
+                || "/sys".equals(normalized) || normalized.startsWith("/sys/")
+                || "/proc".equals(normalized) || normalized.startsWith("/proc/");
     }
 
     private static String unescapeMountField(String value) {

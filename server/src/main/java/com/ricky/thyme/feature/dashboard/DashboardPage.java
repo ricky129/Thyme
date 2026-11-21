@@ -71,13 +71,14 @@ public final class DashboardPage extends Page {
     private final TimeSeriesBuffer diskIoHistory = new TimeSeriesBuffer();
     private final AtomicReference<List<TimeSeriesBuffer>> coreHistories =
             new AtomicReference<>(List.of());
-    private final Map<String, TimeSeriesBuffer> filesystemHistory = new HashMap<>();
+    private final Map<String, FilesystemHistory> filesystemHistories = new HashMap<>();
     private final MetricScheduler scheduler = new MetricScheduler();
     private final EventLogBuffer eventLog = new EventLogBuffer();
     private final EventTransitionTracker transitions = new EventTransitionTracker(eventLog);
     private final AtomicBoolean loading = new AtomicBoolean();
     private final AtomicInteger selectedService = new AtomicInteger();
     private final AtomicInteger selectedCard = new AtomicInteger();
+    private final AtomicInteger selectedFilesystem = new AtomicInteger();
     private final AtomicBoolean details = new AtomicBoolean();
     private final AtomicReference<TimeSeriesBuffer.Range> detailRange =
             new AtomicReference<>(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
@@ -148,22 +149,36 @@ public final class DashboardPage extends Page {
 
     @Override
     public void handleKey(KeyStroke key) {
+        OverviewCard card = currentCard();
         if (key.getKeyType() == KeyType.Escape) {
+            syncCardFromFilesystem();
             details.set(false);
         } else if (key.getKeyType() == KeyType.Enter) {
             if (details.get()) {
+                syncCardFromFilesystem();
                 details.set(false);
             } else {
                 details.set(true);
                 resetDetailState();
+                if (card.filesystem()) {
+                    selectedFilesystem.set(filesystemIndexOf(card.mountPoint()));
+                }
             }
-        } else if (details.get() && key.getKeyType() == KeyType.Tab) {
+        } else if (details.get() && card.kind() == OverviewCard.Kind.CPU
+                && key.getKeyType() == KeyType.Tab) {
             perCore.set(!perCore.get());
             selectedCore.set(Math.max(0, Math.min(selectedCore.get(), coreHistories.get().size() - 1)));
-        } else if (details.get() && perCore.get() && isNextCoreKey(key)) {
+        } else if (details.get() && card.kind() == OverviewCard.Kind.CPU && perCore.get()
+                && isNextCoreKey(key)) {
             selectedCore.updateAndGet(value -> Math.min(value + 1, Math.max(0, coreHistories.get().size() - 1)));
-        } else if (details.get() && perCore.get() && isPreviousCoreKey(key)) {
+        } else if (details.get() && card.kind() == OverviewCard.Kind.CPU && perCore.get()
+                && isPreviousCoreKey(key)) {
             selectedCore.updateAndGet(value -> Math.max(0, value - 1));
+        } else if (details.get() && card.filesystem() && isNextCoreKey(key)) {
+            selectedFilesystem.updateAndGet(value ->
+                    Math.min(value + 1, Math.max(0, filesystemCount() - 1)));
+        } else if (details.get() && card.filesystem() && isPreviousCoreKey(key)) {
+            selectedFilesystem.updateAndGet(value -> Math.max(0, value - 1));
         } else if (details.get() && isNextRangeKey(key)) {
             detailRange.updateAndGet(TimeSeriesBuffer.Range::next);
             resetCursor();
@@ -178,7 +193,7 @@ public final class DashboardPage extends Page {
                 && Character.toLowerCase(key.getCharacter()) == 'e') {
             explainer.set(!explainer.get());
         } else if (isNextCardKey(key)) {
-            selectedCard.updateAndGet(value -> Math.min(value + 1, 4));
+            selectedCard.updateAndGet(value -> Math.min(value + 1, Math.max(0, cardCount() - 1)));
         } else if (isPreviousCardKey(key)) {
             selectedCard.updateAndGet(value -> Math.max(0, value - 1));
         } else if (key.getKeyType() == KeyType.Character && key.getCharacter() != null) {
@@ -192,6 +207,7 @@ public final class DashboardPage extends Page {
         detailRange.set(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
         perCore.set(false);
         selectedCore.set(0);
+        selectedFilesystem.set(0);
         explainer.set(true);
         resetCursor();
     }
@@ -206,8 +222,11 @@ public final class DashboardPage extends Page {
     }
 
     private void moveCursor(int delta) {
-        TimeSeriesBuffer history = perCore.get() && selectedCard.get() == 0
-                ? selectedCoreHistory() : historyForSelectedCard();
+        OverviewCard card = currentCard();
+        boolean perCoreCard = card.kind() == OverviewCard.Kind.CPU && perCore.get();
+        TimeSeriesBuffer history = perCoreCard ? selectedCoreHistory()
+                : card.filesystem() ? selectedFilesystemHistory()
+                : historyForSelectedCard();
         if (history == null) {
             return;
         }
@@ -215,8 +234,7 @@ public final class DashboardPage extends Page {
         if (length == 0) {
             return;
         }
-        AtomicInteger cursorState = perCore.get() && selectedCard.get() == 0
-                ? selectedCoreCursor() : detailCursor;
+        AtomicInteger cursorState = perCoreCard ? selectedCoreCursor() : detailCursor;
         if (cursorState == null) return;
         int current = cursorState.get();
         if (current < 0) {
@@ -246,14 +264,59 @@ public final class DashboardPage extends Page {
     }
 
     private TimeSeriesBuffer historyForSelectedCard() {
-        return switch (selectedCard.get()) {
-            case 0 -> cpuHistory;
-            case 1 -> memoryHistory;
-            case 2 -> temperatureHistory;
-            case 3 -> gpuHistory;
-            case 4 -> diskIoHistory;
-            default -> null;
+        return switch (currentCard().kind()) {
+            case CPU -> cpuHistory;
+            case RAM -> memoryHistory;
+            case TEMPERATURE -> temperatureHistory;
+            case GPU -> gpuHistory;
+            case FILESYSTEM -> selectedFilesystemHistory();
+            case DISK_TOTAL -> diskIoHistory;
         };
+    }
+
+    private TimeSeriesBuffer selectedFilesystemHistory() {
+        List<DiskSnapshot.Filesystem> filesystems = filesystems();
+        if (filesystems.isEmpty()) {
+            return null;
+        }
+        String mountPoint = filesystems.get(selectedFilesystem()).mountPoint();
+        return filesystemHistory(mountPoint).read();
+    }
+
+    private OverviewCard currentCard() {
+        List<OverviewCard> cards = OverviewCard.cards(snapshot.get());
+        int index = Math.max(0, Math.min(selectedCard.get(), cards.size() - 1));
+        return cards.get(index);
+    }
+
+    private int cardCount() {
+        return OverviewCard.cards(snapshot.get()).size();
+    }
+
+    private List<DiskSnapshot.Filesystem> filesystems() {
+        DashboardSnapshot current = snapshot.get();
+        return current == null || current.disk() == null
+                ? List.of() : current.disk().filesystems();
+    }
+
+    private int filesystemCount() {
+        return filesystems().size();
+    }
+
+    private int filesystemIndexOf(String mountPoint) {
+        List<DiskSnapshot.Filesystem> filesystems = filesystems();
+        for (int index = 0; index < filesystems.size(); index++) {
+            if (filesystems.get(index).mountPoint().equals(mountPoint)) {
+                return index;
+            }
+        }
+        return 0;
+    }
+
+    private void syncCardFromFilesystem() {
+        if (details.get() && currentCard().filesystem()) {
+            selectedCard.set(OverviewCard.SYSTEM_CARD_COUNT + selectedFilesystem());
+        }
     }
 
     private static boolean isNextCoreKey(KeyStroke key) {
@@ -323,14 +386,12 @@ public final class DashboardPage extends Page {
                 : ratio(memory.usedBytes(), memory.totalBytes()));
         swapHistory.append(memory == null || memory.swapTotalBytes() <= 0
                 ? Double.NaN : ratio(memory.swapUsedBytes(), memory.swapTotalBytes()));
-        diskIoHistory.append(totalDiskIo(disk));
+        diskIoHistory.append(totalFilesystemIo(disk));
         if (disk != null) {
             for (DiskSnapshot.Filesystem fs : disk.filesystems()) {
-                Double utilization = fs.utilizationPercent();
-
-                filesystemBuffer(fs.mountPoint())
-                        .append(utilization == null ? Double.NaN : utilization);
-
+                FilesystemHistory history = filesystemHistory(fs.mountPoint());
+                history.read().append(mib(fs.readBytesPerSecond()));
+                history.write().append(mib(fs.writeBytesPerSecond()));
                 filesystemEvent(fs);
             }
         }
@@ -406,7 +467,7 @@ public final class DashboardPage extends Page {
         }
     }
 
-    private void updateSnapshot(CpuSnapshot cpu, MemorySnapshot memory, GpuReading gpu,
+    void updateSnapshot(CpuSnapshot cpu, MemorySnapshot memory, GpuReading gpu,
             DiskSnapshot disk, List<ServiceSnapshot> services, Map<String, String> errors) {
         DashboardSnapshot old = snapshot.get();
         snapshot.set(new DashboardSnapshot(Instant.now(), cpu != null ? cpu : old == null ? null : old.cpu(),
@@ -416,9 +477,10 @@ public final class DashboardPage extends Page {
         pageError.set(errors.isEmpty() ? null : errors.values().iterator().next());
     }
 
-    private TimeSeriesBuffer filesystemBuffer(String mount) {
-        synchronized (filesystemHistory) {
-            return filesystemHistory.computeIfAbsent(mount, ignored -> new TimeSeriesBuffer());
+    private FilesystemHistory filesystemHistory(String mount) {
+        synchronized (filesystemHistories) {
+            return filesystemHistories.computeIfAbsent(mount, ignored ->
+                    new FilesystemHistory(new TimeSeriesBuffer(), new TimeSeriesBuffer()));
         }
     }
 
@@ -448,12 +510,19 @@ public final class DashboardPage extends Page {
     }
 
     int detailCursor() {
-        AtomicInteger cursor = perCore.get() && selectedCard.get() == 0 ? selectedCoreCursor() : detailCursor;
+        boolean perCoreCard = perCore.get()
+                && currentCard().kind() == OverviewCard.Kind.CPU;
+        AtomicInteger cursor = perCoreCard ? selectedCoreCursor() : detailCursor;
         return cursor == null ? -1 : cursor.get();
     }
 
     int selectedCore() {
         return selectedCore.get();
+    }
+
+    int selectedFilesystem() {
+        int count = filesystemCount();
+        return count == 0 ? 0 : Math.max(0, Math.min(selectedFilesystem.get(), count - 1));
     }
 
     @Override
@@ -484,23 +553,36 @@ public final class DashboardPage extends Page {
         transitions.transition(key, state, severity, message);
     }
 
-    private static double totalDiskIo(DiskSnapshot disk) {
+    private static double totalFilesystemIo(DiskSnapshot disk) {
         if (disk == null) {
             return Double.NaN;
         }
         double total = 0;
         boolean available = false;
-        for (DiskSnapshot.Device device : disk.devices()) {
-            if (device.readBytesPerSecond() != null) {
-                total += device.readBytesPerSecond();
-                available = true;
-            }
-            if (device.writeBytesPerSecond() != null) {
-                total += device.writeBytesPerSecond();
+        for (DiskSnapshot.Filesystem filesystem : disk.filesystems()) {
+            double value = combinedMib(filesystem);
+            if (!Double.isNaN(value)) {
+                total += value;
                 available = true;
             }
         }
-        return available ? total / (1024 * 1024) : Double.NaN;
+        return available ? total : Double.NaN;
+    }
+
+    private static double combinedMib(DiskSnapshot.Filesystem filesystem) {
+        boolean hasRead = filesystem.readBytesPerSecond() != null;
+        boolean hasWrite = filesystem.writeBytesPerSecond() != null;
+        if (!hasRead && !hasWrite) {
+            return Double.NaN;
+        }
+        double bytes = (hasRead ? filesystem.readBytesPerSecond() : 0)
+                + (hasWrite ? filesystem.writeBytesPerSecond() : 0);
+        return bytes / (1024.0 * 1024);
+    }
+
+    private static double mib(Double bytesPerSecond) {
+        return bytesPerSecond == null
+                ? Double.NaN : bytesPerSecond / (1024.0 * 1024);
     }
 
     private static Double firstGpuUtilization(GpuReading gpu) {
@@ -513,7 +595,21 @@ public final class DashboardPage extends Page {
                 swapHistory, temperatureHistory, gpuHistory, diskIoHistory,
                 eventLog, pageError.get(), selectedCard.get(), details.get(), detailRange.get(),
                 detailCursor(), perCore.get(), explainer.get(), coreHistories.get(), selectedCore.get(),
-                coreCursors.get().stream().mapToInt(AtomicInteger::get).toArray());
+                coreCursors.get().stream().mapToInt(AtomicInteger::get).toArray(),
+                filesystemSeries(), selectedFilesystem());
+    }
+
+    private List<FilesystemSeries> filesystemSeries() {
+        DashboardSnapshot current = snapshot.get();
+        if (current == null || current.disk() == null) {
+            return List.of();
+        }
+        List<FilesystemSeries> series = new java.util.ArrayList<>();
+        for (DiskSnapshot.Filesystem filesystem : current.disk().filesystems()) {
+            FilesystemHistory history = filesystemHistory(filesystem.mountPoint());
+            series.add(FilesystemSeries.from(filesystem, history.read(), history.write()));
+        }
+        return List.copyOf(series);
     }
 
     private static boolean isNextCardKey(KeyStroke key) {
@@ -713,50 +809,6 @@ public final class DashboardPage extends Page {
         }
     }
 
-    void drawStorage(TextGraphics graphics, DashboardSnapshot current, int x, int y, int width, int height) {
-        DiskSnapshot disk = current.disk();
-        if (disk == null) {
-            put(graphics, x + 2, y + 1, width - 4,
-                    "Unavailable: " + current.errors().getOrDefault("Disks", "no data"), RED);
-            return;
-        }
-        if (disk.filesystems().isEmpty()) {
-            put(graphics, x + 2, y + 1, width - 4, "No user-visible mounted filesystems detected", MUTED);
-            return;
-        }
-        int row = y + 1;
-        int maxRows = y + height - 1;
-        for (DiskSnapshot.Filesystem filesystem : disk.filesystems()) {
-            if (row + 1 >= maxRows) {
-                break;
-            }
-            double usedPercent = ratio(filesystem.usedBytes(), filesystem.totalBytes());
-            String mount = shorten(filesystem.mountPoint(), Math.max(12, width / 4));
-            String space = gib(filesystem.usedBytes()) + " / " + gib(filesystem.totalBytes()) + " GiB ("
-                    + percent(usedPercent) + ")";
-            int mountWidth = Math.max(12, width / 5);
-            put(graphics, x + 2, row, mountWidth, mount, rowColor(usedPercent), true);
-            put(graphics, x + 4 + mountWidth, row, width - mountWidth - 8, space, rowColor(usedPercent));
-            String io = "R " + rate(filesystem.readBytesPerSecond())
-                    + " W " + rate(filesystem.writeBytesPerSecond())
-                    + " I/O " + percent(filesystem.utilizationPercent())
-                    + " Lat " + millis(filesystem.averageReadLatencyMillis())
-                    + "/" + millis(filesystem.averageWriteLatencyMillis()) + "ms";
-            int graphWidth = width / 3;
-            int ioWidth = width - graphWidth - 8;
-            put(graphics, x + 2, row + 1, ioWidth, io, rowColor(filesystem.utilizationPercent()));
-            double[] history;
-            synchronized (filesystemHistory) {
-                TimeSeriesBuffer buffer = filesystemHistory.get(filesystem.mountPoint());
-                history = buffer == null ? new double[0]
-                        : buffer.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
-            }
-            put(graphics, x + 4 + ioWidth, row + 1, graphWidth,
-                    sparkline(history, graphWidth), ORANGE);
-            row += 2;
-        }
-    }
-
     void drawServices(
             TextGraphics graphics, DashboardSnapshot current, int x, int y, int width, int height) {
         List<ServiceSnapshot> services = current.services();
@@ -796,13 +848,6 @@ public final class DashboardPage extends Page {
         put(graphics, barX + filled, y, barWidth - filled, BAR_EMPTY.repeat(barWidth - filled), BORDER);
         put(graphics, barX + barWidth + 1, y, valueText.length(), valueText, accent, true);
         return y + 1;
-    }
-
-    private static TextColor rowColor(Double utilization) {
-        if (utilization == null) {
-            return MUTED;
-        }
-        return utilization >= 85 ? RED : utilization >= 65 ? ORANGE : TEXT;
     }
 
     private static TextColor serviceColor(ServiceSnapshot service) {
@@ -874,24 +919,12 @@ public final class DashboardPage extends Page {
         return hertz == null ? "n/a" : String.format("%.1fG", hertz / 1_000_000_000.0);
     }
 
-    private static String millis(Double value) {
-        return value == null ? "--" : String.format("%.1f", value);
-    }
-
     private static String age(TimeSeriesBuffer buffer) {
         Duration age = buffer.latestAge();
         if (age == null || age.compareTo(Duration.ofSeconds(2)) <= 0) {
             return "";
         }
         return "  age " + Math.max(1, age.toSeconds()) + "s";
-    }
-
-    private static String rate(Double bytesPerSecond) {
-        if (bytesPerSecond == null) {
-            return "--";
-        }
-        double mib = bytesPerSecond / (1024.0 * 1024);
-        return mib >= 100 ? String.format("%.0fM/s", mib) : String.format("%.1fM/s", mib);
     }
 
     private static String sparkline(double[] values, int width) {
@@ -909,5 +942,8 @@ public final class DashboardPage extends Page {
             line.append(SPARKLINE[(int) Math.round(value / 100 * (SPARKLINE.length - 1))]);
         }
         return line.toString();
+    }
+
+    private record FilesystemHistory(TimeSeriesBuffer read, TimeSeriesBuffer write) {
     }
 }

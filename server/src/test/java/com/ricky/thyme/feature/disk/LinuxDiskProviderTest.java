@@ -15,6 +15,50 @@ class LinuxDiskProviderTest {
     Path temporaryDirectory;
 
     @Test
+    void skipsBootAndEfiMountsBeforeReadingSpace() throws Exception {
+        Path diskStats = temporaryDirectory.resolve("system-diskstats");
+        Path blockRoot = temporaryDirectory.resolve("system-block");
+        Path mounts = temporaryDirectory.resolve("system-mounts");
+        Files.createDirectories(blockRoot.resolve("sda1"));
+        Files.writeString(blockRoot.resolve("sda1/size"), "1000\n");
+        Files.writeString(diskStats, "");
+        Files.writeString(mounts,
+                "/dev/sda1 /boot ext4 rw 0 0\n"
+                        + "/dev/sda2 /boot/efi vfat rw 0 0\n"
+                        + "/dev/sda3 /efi vfat rw 0 0\n"
+                        + "tmpfs /run tmpfs rw 0 0\n");
+
+        var snapshot = new LinuxDiskProvider(diskStats, blockRoot, mounts).read();
+
+        assertTrue(snapshot.filesystems().isEmpty());
+    }
+
+    @Test
+    void keepsOnlyRealFilesystemsFromTheHost() throws Exception {
+        Path diskStats = temporaryDirectory.resolve("diskstats");
+        Path blockRoot = temporaryDirectory.resolve("block");
+        Path mounts = temporaryDirectory.resolve("mounts");
+        Path root = temporaryDirectory.resolve("root");
+        Files.createDirectories(root.resolve("mnt/media_drive"));
+        Files.createDirectories(blockRoot.resolve("nvme0n1p2"));
+        Files.createDirectories(blockRoot.resolve("sda1"));
+        Files.writeString(diskStats, "");
+        Files.writeString(mounts,
+                "/dev/nvme0n1p2 / ext4 rw 0 0\n"
+                        + "/dev/sda1 /mnt/media_drive btrfs rw 0 0\n"
+                        + "efivarfs /sys/firmware/efi/efivars efivarfs rw 0 0\n"
+                        + "bpf /sys/fs/bpf bpf rw 0 0\n"
+                        + "binfmt_misc /proc/sys/fs/binfmt_misc binfmt_misc rw 0 0\n"
+                        + "tmpfs /run tmpfs rw 0 0\n");
+
+        var snapshot = new LinuxDiskProvider(diskStats, blockRoot, mounts, root).read();
+
+        assertEquals(List.of("/", "/mnt/media_drive"),
+                snapshot.filesystems().stream()
+                        .map(DiskSnapshot.Filesystem::mountPoint).toList());
+    }
+
+    @Test
     void reportsIoRatesAndMountedFilesystemUsage() throws Exception {
         Path diskStats = temporaryDirectory.resolve("diskstats");
         Path blockRoot = temporaryDirectory.resolve("block");

@@ -5,6 +5,7 @@ import com.googlecode.lanterna.TerminalSize;
 import com.googlecode.lanterna.TextColor;
 import com.googlecode.lanterna.graphics.TextGraphics;
 import com.ricky.thyme.feature.cpu.CpuSnapshot;
+import com.ricky.thyme.feature.disk.DiskSnapshot;
 import com.ricky.thyme.feature.gpu.GpuReading;
 import com.ricky.thyme.feature.gpu.GpuSnapshot;
 import com.ricky.thyme.feature.telemetry.EventLogBuffer;
@@ -104,25 +105,30 @@ public final class DashboardOverviewRenderer {
         drawFooter(graphics, width, footerY);
         if (details) {
             drawOverview(graphics, size, snapshot, cpuHistory, memoryHistory,
-                    temperatureHistory, gpuHistory, diskIoHistory, eventLog, error, selectedCard);
+                    temperatureHistory, gpuHistory, diskIoHistory, eventLog, error,
+                    selectedCard, List.of());
             drawDetail(graphics, width, footerY - 2, snapshot, cpuHistory, memoryHistory,
                     swapHistory, temperatureHistory, gpuHistory, diskIoHistory, selectedCard,
-                    TimeSeriesBuffer.Range.FIFTEEN_MINUTES, -1, false, true, List.of(), 0, new int[0]);
+                    TimeSeriesBuffer.Range.FIFTEEN_MINUTES, -1, false, true, List.of(), 0,
+                    new int[0], List.of(), 0);
             return;
         }
         drawOverview(graphics, size, snapshot, cpuHistory, memoryHistory,
-                temperatureHistory, gpuHistory, diskIoHistory, eventLog, error, selectedCard);
+                temperatureHistory, gpuHistory, diskIoHistory, eventLog, error,
+                selectedCard, List.of());
     }
 
     private static void drawOverview(TextGraphics graphics, TerminalSize size, DashboardSnapshot snapshot,
             TimeSeriesBuffer cpuHistory, TimeSeriesBuffer memoryHistory,
             TimeSeriesBuffer temperatureHistory, TimeSeriesBuffer gpuHistory, TimeSeriesBuffer diskIoHistory,
-            EventLogBuffer eventLog, String error, int selectedCard) {
+            EventLogBuffer eventLog, String error, int selectedCard,
+            List<FilesystemSeries> filesystems) {
         cpuHistory = safeHistory(cpuHistory);
         memoryHistory = safeHistory(memoryHistory);
         temperatureHistory = safeHistory(temperatureHistory);
         gpuHistory = safeHistory(gpuHistory);
         diskIoHistory = safeHistory(diskIoHistory);
+        filesystems = filesystems == null ? List.of() : filesystems;
         eventLog = eventLog == null ? new EventLogBuffer() : eventLog;
         int width = size.getColumns();
         int height = size.getRows();
@@ -133,9 +139,9 @@ public final class DashboardOverviewRenderer {
             drawCompact(graphics, width, contentY, contentHeight, snapshot, cpuHistory, error);
             return;
         }
-        int cardsHeight = width >= 120 ? 5 : 10;
-        drawCards(graphics, width, contentY, cardsHeight, snapshot, cpuHistory, memoryHistory,
-                temperatureHistory, gpuHistory, diskIoHistory, selectedCard);
+        int cardsHeight = cardsHeight(width, OverviewCard.cards(snapshot).size());
+        drawCards(graphics, width, contentY, snapshot, cpuHistory, memoryHistory,
+                temperatureHistory, gpuHistory, diskIoHistory, filesystems, selectedCard);
         int bodyY = contentY + cardsHeight + 1;
         int bodyHeight = Math.max(4, footerY - bodyY);
         if (width >= 120) {
@@ -172,12 +178,30 @@ public final class DashboardOverviewRenderer {
             int selectedCard, boolean details, TimeSeriesBuffer.Range range, int cursor,
             boolean perCore, boolean explainer, List<TimeSeriesBuffer> coreHistories,
             int selectedCore, int[] coreCursors) {
+        draw(graphics, size, snapshot, cpuHistory, memoryHistory, swapHistory,
+                temperatureHistory, gpuHistory, diskIoHistory, eventLog, error,
+                selectedCard, details, range, cursor, perCore, explainer,
+                coreHistories, selectedCore, coreCursors, List.of(), 0);
+    }
+
+    /**
+     * Draws the overview and detail overlay with per-filesystem I/O tiles.
+     */
+    public static void draw(TextGraphics graphics, TerminalSize size, DashboardSnapshot snapshot,
+            TimeSeriesBuffer cpuHistory, TimeSeriesBuffer memoryHistory, TimeSeriesBuffer swapHistory,
+            TimeSeriesBuffer temperatureHistory, TimeSeriesBuffer gpuHistory,
+            TimeSeriesBuffer diskIoHistory, EventLogBuffer eventLog, String error,
+            int selectedCard, boolean details, TimeSeriesBuffer.Range range, int cursor,
+            boolean perCore, boolean explainer, List<TimeSeriesBuffer> coreHistories,
+            int selectedCore, int[] coreCursors,
+            List<FilesystemSeries> filesystems, int selectedFilesystem) {
         cpuHistory = safeHistory(cpuHistory);
         memoryHistory = safeHistory(memoryHistory);
         swapHistory = safeHistory(swapHistory);
         temperatureHistory = safeHistory(temperatureHistory);
         gpuHistory = safeHistory(gpuHistory);
         diskIoHistory = safeHistory(diskIoHistory);
+        filesystems = filesystems == null ? List.of() : filesystems;
         eventLog = eventLog == null ? new EventLogBuffer() : eventLog;
         int width = size.getColumns();
         int height = size.getRows();
@@ -192,11 +216,13 @@ public final class DashboardOverviewRenderer {
         drawHeader(graphics, width, snapshot);
         drawFooter(graphics, width, height - 1);
         drawOverview(graphics, size, snapshot, cpuHistory, memoryHistory,
-                temperatureHistory, gpuHistory, diskIoHistory, eventLog, error, selectedCard);
+                temperatureHistory, gpuHistory, diskIoHistory, eventLog, error,
+                selectedCard, filesystems);
         if (details) {
             drawDetail(graphics, width, height - 3, snapshot, cpuHistory, memoryHistory,
                     swapHistory, temperatureHistory, gpuHistory, diskIoHistory, selectedCard,
-                    range, cursor, perCore, explainer, coreHistories, selectedCore, coreCursors);
+                    range, cursor, perCore, explainer, coreHistories, selectedCore, coreCursors,
+                    filesystems, selectedFilesystem);
         }
     }
 
@@ -210,9 +236,15 @@ public final class DashboardOverviewRenderer {
             TimeSeriesBuffer temperatureHistory, TimeSeriesBuffer gpuHistory,
             TimeSeriesBuffer diskIoHistory, int selectedCard,
             TimeSeriesBuffer.Range range, int cursor, boolean perCore, boolean explainer,
-            List<TimeSeriesBuffer> coreHistories, int selectedCore, int[] coreCursors) {
-        String[] labels = {"CPU", "RAM", "Temperature", "GPU", "Disk I/O"};
-        String label = labels[Math.max(0, Math.min(labels.length - 1, selectedCard))];
+            List<TimeSeriesBuffer> coreHistories, int selectedCore, int[] coreCursors,
+            List<FilesystemSeries> filesystems, int selectedFilesystem) {
+        OverviewCard card = cardAt(snapshot, selectedCard);
+        if (card.filesystem()) {
+            drawFilesystemDetail(graphics, width, height, filesystems, selectedFilesystem,
+                    range, cursor, explainer);
+            return;
+        }
+        String label = card.detailLabel();
         int overlayWidth = Math.max(44, Math.min(width - 4, (int) Math.round(width * 0.85)));
         int overlayHeight = Math.max(11, Math.min(height - 1, (int) Math.round(height * 0.90)));
         int x = (width - overlayWidth) / 2;
@@ -233,7 +265,7 @@ public final class DashboardOverviewRenderer {
                 ? "       CPU: " + (perCore ? "Total  [Per-core]" : "[Total]  Per-core") + "  (Tab)"
                 : ""),
                 Theme.INK_SECONDARY);
-        if (perCore && selectedCard == 0) {
+        if (perCore && card.kind() == OverviewCard.Kind.CPU) {
             int chartY = y + 4;
             boolean compact = overlayHeight < 20;
             int gridHeight = Math.max(3, overlayHeight - (explainer ? 13 : 10));
@@ -298,6 +330,211 @@ public final class DashboardOverviewRenderer {
         drawDetailSummary(graphics, snapshot, selectedCard, innerX, detailY, innerW, perCore, selectedCore);
         Theme.put(graphics, innerX, y + overlayHeight - 1, innerW,
                 "←/→ cursor   [ ] range   e explain   Esc close", Theme.INK_MUTED);
+    }
+
+    private static OverviewCard cardAt(DashboardSnapshot snapshot, int index) {
+        List<OverviewCard> cards = OverviewCard.cards(snapshot);
+        return cards.get(Math.max(0, Math.min(index, cards.size() - 1)));
+    }
+
+    private static void drawFilesystemDetail(TextGraphics graphics, int width, int height,
+            List<FilesystemSeries> filesystems, int selectedFilesystem,
+            TimeSeriesBuffer.Range range, int cursor, boolean explainer) {
+        int overlayWidth = Math.max(44, Math.min(width - 4, (int) Math.round(width * 0.85)));
+        int overlayHeight = Math.max(11, Math.min(height - 1, (int) Math.round(height * 0.90)));
+        int x = (width - overlayWidth) / 2;
+        int y = Math.max(2, (height - overlayHeight) / 2 + 1);
+        graphics.setBackgroundColor(Theme.SURFACE);
+        graphics.fillRectangle(new TerminalPosition(x, y), new TerminalSize(overlayWidth, overlayHeight), ' ');
+        Panel.draw(graphics, x, y, overlayWidth, overlayHeight, "Disk I/O  ·  Esc close");
+        int innerX = x + 2;
+        int innerW = overlayWidth - 4;
+        if (filesystems.isEmpty()) {
+            Theme.put(graphics, innerX, y + 2, innerW,
+                    "No user-visible filesystems detected", Theme.INK_MUTED);
+            Theme.put(graphics, innerX, y + overlayHeight - 1, innerW,
+                    "Esc close", Theme.INK_MUTED);
+            return;
+        }
+        int selected = Math.max(0, Math.min(selectedFilesystem, filesystems.size() - 1));
+        FilesystemSeries filesystem = filesystems.get(selected);
+        Theme.put(graphics, innerX, y + 2, innerW,
+                "Filesystems " + filesystems.size() + "   selected " + filesystem.mountPoint()
+                + "   R " + mibRate(mib(filesystem.readBytesPerSecond()))
+                + "   W " + mibRate(mib(filesystem.writeBytesPerSecond())), Theme.INK);
+        String coverage = filesystem.readHistory().coverageNote(range);
+        Theme.put(graphics, innerX, y + 3, innerW,
+                rangeTabs(range) + (coverage == null ? "" : "  " + coverage)
+                + "   fs " + (selected + 1) + "/" + filesystems.size()
+                + (filesystems.size() > 1 ? "  (↑↓)" : ""), Theme.INK_SECONDARY);
+        int chartY = y + 4;
+        boolean compact = overlayHeight < 20;
+        int gridHeight = compact
+                ? Math.max(1, overlayHeight - 5)
+                : Math.max(3, overlayHeight - (explainer ? 13 : 10));
+        drawFilesystemGrid(graphics, innerX, chartY, innerW, gridHeight,
+                filesystems, range, selected, cursor);
+        int detailY = chartY + gridHeight + 1;
+        double[] samples = combinedSamples(filesystem, range);
+        if (cursor >= 0 && cursor < samples.length && !Double.isNaN(samples[cursor])) {
+            String readout = "▸ " + filesystem.mountPoint()
+                    + "  read " + mibRate(mibAt(filesystem.readHistory().samples(range), cursor))
+                    + "  write " + mibRate(mibAt(filesystem.writeHistory().samples(range), cursor));
+            Theme.put(graphics, innerX, detailY, innerW, readout, Theme.ACCENT);
+            detailY++;
+        }
+        if (!compact && explainer && detailY < y + overlayHeight - 2) {
+            Panel.draw(graphics, innerX, detailY, innerW, 3, "What is Disk I/O?");
+            Theme.put(graphics, innerX + 1, detailY + 1, innerW - 2,
+                    explanation(4), Theme.INK_SECONDARY);
+            detailY += 4;
+        }
+        if (!compact && detailY < y + overlayHeight - 1) {
+            Theme.put(graphics, innerX, detailY, innerW,
+                    filesystemSummary(filesystem), Theme.INK_SECONDARY);
+        }
+        Theme.put(graphics, innerX, y + overlayHeight - 1, innerW,
+                "↑↓ filesystem   ←/→ cursor   [ ] range   e explain   Esc close", Theme.INK_MUTED);
+    }
+
+    private static void drawFilesystemGrid(TextGraphics graphics, int x, int y, int width, int height,
+            List<FilesystemSeries> filesystems, TimeSeriesBuffer.Range range,
+            int selected, int cursor) {
+        if (filesystems.isEmpty()) {
+            Theme.put(graphics, x, y, width, "no user-visible filesystems", Theme.INK_MUTED);
+            return;
+        }
+        int columns = width >= 160 ? 4 : width >= 80 ? 2 : 1;
+        columns = Math.min(columns, filesystems.size());
+        int rows = (filesystems.size() + columns - 1) / columns;
+        double max = filesystemAxisMaximum(filesystems, range);
+        if (height < rows * 4) {
+            drawFilesystemRows(graphics, x, y, width, height, filesystems, range, selected, max);
+            return;
+        }
+        int cellWidth = Math.max(8, width / columns);
+        int cellHeight = Math.max(4, height / rows);
+        for (int index = 0; index < filesystems.size(); index++) {
+            int column = index % columns;
+            int row = index / columns;
+            int cellX = x + column * cellWidth;
+            int cellY = y + row * cellHeight;
+            int actualWidth = column == columns - 1 ? width - column * cellWidth : cellWidth - 1;
+            int actualHeight = row == rows - 1 ? height - row * cellHeight : cellHeight - 1;
+            FilesystemSeries filesystem = filesystems.get(index);
+            double[] samples = combinedSamples(filesystem, range);
+            String title = (index == selected ? "▸ " : "  ") + filesystem.mountPoint();
+            if (actualHeight >= 6) {
+                LineChart.draw(graphics, cellX, cellY, actualWidth, actualHeight, title, "M/s",
+                        samples, max, Theme.IO_SERIES, cursor, null, false);
+            } else {
+                Panel.draw(graphics, cellX, cellY, actualWidth, actualHeight, title);
+                Sparkline.draw(graphics, cellX + 1, cellY + 1, actualWidth - 2,
+                        normalize(samples, max), Theme.IO_SERIES, false);
+            }
+        }
+    }
+
+    private static void drawFilesystemRows(TextGraphics graphics, int x, int y, int width, int height,
+            List<FilesystemSeries> filesystems, TimeSeriesBuffer.Range range,
+            int selected, double max) {
+        int labelWidth = Math.min(20, Math.max(8, width / 3));
+        int visible = Math.min(filesystems.size(), Math.max(1, height));
+        int start = Math.max(0, Math.min(selected - visible + 1, filesystems.size() - visible));
+        for (int row = 0; row < visible; row++) {
+            int index = start + row;
+            FilesystemSeries filesystem = filesystems.get(index);
+            String title = (index == selected ? "▸ " : "  ") + filesystem.mountPoint();
+            Theme.put(graphics, x, y + row, labelWidth,
+                    Theme.clipToWidth(title, labelWidth),
+                    index == selected ? Theme.ACCENT : Theme.INK_SECONDARY);
+            Sparkline.draw(graphics, x + labelWidth, y + row, Math.max(1, width - labelWidth),
+                    normalize(combinedSamples(filesystem, range), max), Theme.IO_SERIES, false);
+        }
+    }
+
+    private static double filesystemAxisMaximum(List<FilesystemSeries> filesystems,
+            TimeSeriesBuffer.Range range) {
+        double peak = 1;
+        for (FilesystemSeries filesystem : filesystems) {
+            for (double sample : combinedSamples(filesystem, range)) {
+                if (!Double.isNaN(sample)) {
+                    peak = Math.max(peak, sample);
+                }
+            }
+        }
+        return niceCeiling(peak * 1.1);
+    }
+
+    private static double[] combinedSamples(FilesystemSeries filesystem,
+            TimeSeriesBuffer.Range range) {
+        double[] read = filesystem.readHistory().samples(range);
+        double[] write = filesystem.writeHistory().samples(range);
+        int length = Math.max(read.length, write.length);
+        double[] combined = new double[length];
+        for (int index = 0; index < length; index++) {
+            combined[index] = combinedAt(read, write, index);
+        }
+        return combined;
+    }
+
+    private static double combinedAt(double[] read, double[] write, int index) {
+        double readValue = index < read.length ? read[index] : Double.NaN;
+        double writeValue = index < write.length ? write[index] : Double.NaN;
+        if (Double.isNaN(readValue) && Double.isNaN(writeValue)) {
+            return Double.NaN;
+        }
+        return (Double.isNaN(readValue) ? 0 : readValue)
+                + (Double.isNaN(writeValue) ? 0 : writeValue);
+    }
+
+    private static double[] normalize(double[] samples, double max) {
+        double safeMax = Math.max(1, max);
+        double[] normalized = new double[samples.length];
+        for (int index = 0; index < samples.length; index++) {
+            normalized[index] = Double.isNaN(samples[index])
+                    ? Double.NaN : Math.min(100, samples[index] / safeMax * 100);
+        }
+        return normalized;
+    }
+
+    private static String filesystemSummary(FilesystemSeries filesystem) {
+        StringBuilder text = new StringBuilder();
+        text.append(filesystem.type())
+                .append("   used ").append(gib(filesystem.usedBytes()))
+                .append(" / ").append(gib(filesystem.totalBytes())).append(" GiB");
+        if (filesystem.utilizationPercent() != null) {
+            text.append("   active ").append(String.format("%.0f%%", filesystem.utilizationPercent()));
+        }
+        if (!filesystem.backingDevices().isEmpty()) {
+            text.append("   ").append(String.join(", ", filesystem.backingDevices()));
+        }
+        return text.toString();
+    }
+
+    private static Double mibAt(double[] samples, int index) {
+        if (index < 0 || index >= samples.length || Double.isNaN(samples[index])) {
+            return null;
+        }
+        return samples[index];
+    }
+
+    private static String mibRate(Double mebibytesPerSecond) {
+        if (mebibytesPerSecond == null || Double.isNaN(mebibytesPerSecond)) {
+            return "n/a";
+        }
+        return mebibytesPerSecond >= 100
+                ? String.format("%.0fM/s", mebibytesPerSecond)
+                : String.format("%.1fM/s", mebibytesPerSecond);
+    }
+
+    private static String mibShort(Double bytesPerSecond) {
+        return bytesPerSecond == null
+                ? "n/a" : String.format("%.1f", bytesPerSecond / (1024.0 * 1024));
+    }
+
+    private static Double mib(Double bytesPerSecond) {
+        return bytesPerSecond == null ? null : bytesPerSecond / (1024.0 * 1024);
     }
 
     private static void drawDetailSummary(TextGraphics graphics, DashboardSnapshot snapshot,
@@ -406,10 +643,14 @@ public final class DashboardOverviewRenderer {
                 if (!Double.isNaN(sample))
                     peak = Math.max(peak, sample);
         }
-        double target = Math.max(1, peak * 1.1);
-        double scale = Math.pow(10, Math.floor(Math.log10(target)));
+        return niceCeiling(peak * 1.1);
+    }
+
+    private static double niceCeiling(double target) {
+        double safeTarget = Math.max(1, target);
+        double scale = Math.pow(10, Math.floor(Math.log10(safeTarget)));
         for (double step : new double[]{1, 2, 5, 10})
-            if (step * scale >= target)
+            if (step * scale >= safeTarget)
                 return step * scale;
         return 10 * scale;
     }
@@ -496,30 +737,124 @@ public final class DashboardOverviewRenderer {
         }
     }
 
-    private static void drawCards(TextGraphics graphics, int width, int y, int height,
+    /** Height of one KPI card row. */
+    private static final int CARD_HEIGHT = 5;
+
+    /** Vertical distance between two KPI card rows, including the gap. */
+    private static final int CARD_STRIDE = 6;
+
+    private static int cardColumns(int width, int cardCount) {
+        int maximum = width >= 160 ? 7 : width >= 120 ? 5 : width >= 80 ? 4 : 3;
+        return Math.max(1, Math.min(cardCount, maximum));
+    }
+
+    private static int cardsHeight(int width, int cardCount) {
+        int columns = cardColumns(width, cardCount);
+        int rows = Math.max(1, (cardCount + columns - 1) / columns);
+        return rows * CARD_STRIDE - 1;
+    }
+
+    private static void drawCards(TextGraphics graphics, int width, int y,
             DashboardSnapshot snapshot, TimeSeriesBuffer cpuHistory, TimeSeriesBuffer memoryHistory,
             TimeSeriesBuffer temperatureHistory, TimeSeriesBuffer gpuHistory,
-            TimeSeriesBuffer diskIoHistory, int selectedCard) {
-        int columns = width >= 120 ? 5 : 3;
+            TimeSeriesBuffer diskIoHistory, List<FilesystemSeries> filesystems, int selectedCard) {
+        List<OverviewCard> cards = OverviewCard.cards(snapshot);
+        int columns = cardColumns(width, cards.size());
         int gap = 1;
         int cardWidth = (width - (columns - 1) * gap) / columns;
-        String[] labels = {"CPU", "RAM", "Temp", "GPU", "Disk I/O"};
-        String[] values = cardValues(snapshot);
-        double[][] history = {cpuHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES),
-            memoryHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES),
-            temperatureHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES),
-            gpuHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES),
-            diskIoHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES)};
-        for (int i = 0; i < labels.length; i++) {
-            int row = width >= 120 ? 0 : i / columns;
-            int column = i % columns;
+        double filesystemMax = filesystemAxisMaximum(filesystems, TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
+        for (int index = 0; index < cards.size(); index++) {
+            int row = index / columns;
+            int column = index % columns;
             int x = column * (cardWidth + gap);
-            int cardY = y + row * (height / 2 + 1);
-            StatCard.draw(graphics, x, cardY, cardWidth, width >= 120 ? height : height / 2,
-                    labels[i], values[i], cardColor(labels[i], snapshot), history[i],
-                    i < 3 ? "current" : "latest sample", true, i == selectedCard,
-                    cardSparkColor(labels[i]));
+            int cardY = y + row * CARD_STRIDE;
+            drawCard(graphics, cards.get(index), x, cardY, cardWidth, snapshot,
+                    cpuHistory, memoryHistory, temperatureHistory, gpuHistory, diskIoHistory,
+                    filesystems, filesystemMax, index == selectedCard);
         }
+    }
+
+    private static void drawCard(TextGraphics graphics, OverviewCard card, int x, int y, int width,
+            DashboardSnapshot snapshot, TimeSeriesBuffer cpuHistory, TimeSeriesBuffer memoryHistory,
+            TimeSeriesBuffer temperatureHistory, TimeSeriesBuffer gpuHistory,
+            TimeSeriesBuffer diskIoHistory, List<FilesystemSeries> filesystems,
+            double filesystemMax, boolean selected) {
+        TimeSeriesBuffer.Range fifteenMinutes = TimeSeriesBuffer.Range.FIFTEEN_MINUTES;
+        String label = card.label();
+        String value;
+        TextColor valueColor;
+        double[] history;
+        String caption;
+        TextColor sparkColor;
+        switch (card.kind()) {
+            case CPU -> {
+                CpuSnapshot cpu = snapshot == null ? null : snapshot.cpu();
+                value = percent(cpu == null ? null : cpu.totalUsagePercent());
+                valueColor = Theme.utilizationColor(cpu == null ? null : cpu.totalUsagePercent());
+                history = cpuHistory.samples(fifteenMinutes);
+                caption = "current";
+                sparkColor = Theme.CPU_SERIES;
+            }
+            case RAM -> {
+                Double used = snapshot == null || snapshot.memory() == null ? null
+                        : ratio(snapshot.memory().usedBytes(), snapshot.memory().totalBytes());
+                value = percent(used);
+                valueColor = Theme.utilizationColor(used);
+                history = memoryHistory.samples(fifteenMinutes);
+                caption = "current";
+                sparkColor = Theme.MEMORY_SERIES;
+            }
+            case TEMPERATURE -> {
+                CpuSnapshot cpu = snapshot == null ? null : snapshot.cpu();
+                Double temperature = cpu == null ? null : cpu.temperatureCelsius();
+                value = temperature(temperature);
+                valueColor = Theme.temperatureColor(temperature);
+                history = temperatureHistory.samples(fifteenMinutes);
+                caption = "current";
+                sparkColor = Theme.INK_SECONDARY;
+            }
+            case GPU -> {
+                GpuSnapshot gpu = firstGpu(snapshot == null ? null : snapshot.gpu());
+                Double utilization = gpu == null ? null : gpu.utilizationPercent();
+                value = percent(utilization);
+                valueColor = Theme.utilizationColor(utilization);
+                history = gpuHistory.samples(fifteenMinutes);
+                caption = "latest sample";
+                sparkColor = Theme.INK_SECONDARY;
+            }
+            case FILESYSTEM -> {
+                FilesystemSeries filesystem = findFilesystem(filesystems, card.mountPoint());
+                Double combined = filesystem == null ? null : combinedMib(filesystem);
+                value = combined == null ? "n/a" : mibRate(combined);
+                valueColor = Theme.INK;
+                history = filesystem == null ? new double[0]
+                        : normalize(combinedSamples(filesystem, fifteenMinutes), filesystemMax);
+                caption = filesystem == null ? "n/a"
+                        : "R " + mibShort(filesystem.readBytesPerSecond())
+                        + " W " + mibShort(filesystem.writeBytesPerSecond()) + " M/s";
+                sparkColor = Theme.IO_SERIES;
+            }
+            default -> {
+                Double total = totalFilesystemIo(snapshot == null ? null : snapshot.disk());
+                value = total == null ? "n/a" : rate(total);
+                valueColor = Theme.INK;
+                history = normalize(diskIoHistory.samples(fifteenMinutes),
+                        historyMaximum(diskIoHistory, fifteenMinutes));
+                caption = "latest sample";
+                sparkColor = Theme.IO_SERIES;
+            }
+        }
+        StatCard.draw(graphics, x, y, width, CARD_HEIGHT, label, value, valueColor, history,
+                caption, true, selected, sparkColor);
+    }
+
+    private static FilesystemSeries findFilesystem(List<FilesystemSeries> filesystems, String mountPoint) {
+        for (FilesystemSeries filesystem : filesystems) {
+            if (filesystem.mountPoint().equals(mountPoint)) {
+                return filesystem;
+            }
+        }
+        return null;
     }
 
     private static void drawCharts(TextGraphics graphics, int x, int y, int width, int height,
@@ -583,39 +918,13 @@ public final class DashboardOverviewRenderer {
     private static String[] cardValues(DashboardSnapshot snapshot) {
         CpuSnapshot cpu = snapshot == null ? null : snapshot.cpu();
         GpuSnapshot gpu = firstGpu(snapshot == null ? null : snapshot.gpu());
-        Double diskIo = firstDiskIo(snapshot);
+        Double diskIo = totalFilesystemIo(snapshot == null ? null : snapshot.disk());
         return new String[]{percent(cpu == null ? null : cpu.totalUsagePercent()),
             percent(snapshot == null || snapshot.memory() == null ? null
             : ratio(snapshot.memory().usedBytes(), snapshot.memory().totalBytes())),
             temperature(cpu == null ? null : cpu.temperatureCelsius()),
             percent(gpu == null ? null : gpu.utilizationPercent()),
             rate(diskIo)};
-    }
-
-    private static TextColor cardColor(String label, DashboardSnapshot snapshot) {
-        if ("Temp".equals(label)) {
-            CpuSnapshot cpu = snapshot == null ? null : snapshot.cpu();
-            return Theme.temperatureColor(cpu == null ? null : cpu.temperatureCelsius());
-        }
-        if ("RAM".equals(label)) {
-            return Theme.utilizationColor(snapshot == null || snapshot.memory() == null ? null
-                    : ratio(snapshot.memory().usedBytes(), snapshot.memory().totalBytes()));
-        }
-        if ("GPU".equals(label)) {
-            GpuSnapshot gpu = firstGpu(snapshot == null ? null : snapshot.gpu());
-            return Theme.utilizationColor(gpu == null ? null : gpu.utilizationPercent());
-        }
-        CpuSnapshot cpu = snapshot == null ? null : snapshot.cpu();
-        return "CPU".equals(label) ? Theme.utilizationColor(cpu == null ? null : cpu.totalUsagePercent()) : Theme.INK;
-    }
-
-    private static TextColor cardSparkColor(String label) {
-        return switch (label) {
-            case "CPU" -> Theme.CPU_SERIES;
-            case "RAM" -> Theme.MEMORY_SERIES;
-            case "Disk I/O" -> Theme.IO_SERIES;
-            default -> Theme.INK_SECONDARY;
-        };
     }
 
     private static TextColor healthColor(DashboardSnapshot snapshot) {
@@ -629,14 +938,36 @@ public final class DashboardOverviewRenderer {
         return gpu == null || gpu.devices().isEmpty() ? null : gpu.devices().get(0);
     }
 
-    private static Double firstDiskIo(DashboardSnapshot snapshot) {
-        if (snapshot == null || snapshot.disk() == null || snapshot.disk().devices().isEmpty())
+    private static Double totalFilesystemIo(DiskSnapshot disk) {
+        if (disk == null || disk.filesystems().isEmpty()) {
             return null;
-        var disk = snapshot.disk().devices().get(0);
-        if (disk.readBytesPerSecond() == null && disk.writeBytesPerSecond() == null)
+        }
+        double total = 0;
+        boolean available = false;
+        for (DiskSnapshot.Filesystem filesystem : disk.filesystems()) {
+            boolean hasRead = filesystem.readBytesPerSecond() != null;
+            boolean hasWrite = filesystem.writeBytesPerSecond() != null;
+            if (hasRead || hasWrite) {
+                total += (hasRead ? filesystem.readBytesPerSecond() : 0)
+                        + (hasWrite ? filesystem.writeBytesPerSecond() : 0);
+                available = true;
+            }
+        }
+        return available ? total : null;
+    }
+
+    private static Double combinedMib(FilesystemSeries filesystem) {
+        Double read = mib(filesystem.readBytesPerSecond());
+        Double write = mib(filesystem.writeBytesPerSecond());
+        if (read == null && write == null) {
             return null;
-        return (disk.readBytesPerSecond() == null ? 0 : disk.readBytesPerSecond())
-                + (disk.writeBytesPerSecond() == null ? 0 : disk.writeBytesPerSecond());
+        }
+        return (read == null ? 0 : read) + (write == null ? 0 : write);
+    }
+
+    private static double historyMaximum(TimeSeriesBuffer history, TimeSeriesBuffer.Range range) {
+        double peak = history.peak(range);
+        return Double.isNaN(peak) ? 100 : niceCeiling(peak * 1.1);
     }
 
     private static String percent(Double value) {
