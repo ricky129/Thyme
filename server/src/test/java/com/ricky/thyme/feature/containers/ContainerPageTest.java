@@ -14,7 +14,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -210,26 +209,12 @@ class ContainerPageTest {
     }
 
     private static String textContainerName(ContainerPage page) {
-        try {
-            var method = ContainerPage.class.getDeclaredMethod("selectedContainer");
-            method.setAccessible(true);
-            ContainerSnapshot c = (ContainerSnapshot) method.invoke(page);
-            return c != null ? c.name() : null;
-        } catch (ReflectiveOperationException e) {
-            throw new RuntimeException(e);
-        }
+        ContainerSnapshot c = page.selectedContainer();
+        return c != null ? c.name() : null;
     }
 
     private static void injectContainers(ContainerPage page, List<ContainerSnapshot> list) {
-        try {
-            var field = ContainerPage.class.getDeclaredField("containers");
-            field.setAccessible(true);
-            @SuppressWarnings("unchecked")
-            var ref = (AtomicReference<List<ContainerSnapshot>>) field.get(page);
-            ref.set(list);
-        } catch (ReflectiveOperationException e) {
-            throw new RuntimeException(e);
-        }
+        page.setContainers(list);
     }
 
     private static void writeSnapshot(String prefix, TerminalSize size, ContainerPage page) throws IOException {

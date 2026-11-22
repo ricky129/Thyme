@@ -21,6 +21,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Render-only responsive composition for the system overview.
@@ -1021,10 +1022,10 @@ public final class DashboardOverviewRenderer {
     private static void drawEvents(TextGraphics graphics, int x, int y, int width, int height,
             EventLogBuffer eventLog, String eventFilter) {
         List<EventLog.Entry> entries = new ArrayList<>();
-        String q = (eventFilter == null || eventFilter.isBlank()) ? null : eventFilter.toLowerCase();
+        String q = (eventFilter == null || eventFilter.isBlank()) ? null : eventFilter.toLowerCase(Locale.ROOT);
         for (EventLogBuffer.Event event : eventLog.snapshot()) {
-            if (q == null || event.message().toLowerCase().contains(q)
-                    || event.severity().name().toLowerCase().contains(q)) {
+            if (q == null || event.message().toLowerCase(Locale.ROOT).contains(q)
+                    || event.severity().name().toLowerCase(Locale.ROOT).contains(q)) {
                 entries.add(new EventLog.Entry(CLOCK.format(event.time()), severityColor(event.severity()), event.message()));
             }
         }
@@ -1118,24 +1119,12 @@ public final class DashboardOverviewRenderer {
         return value == null ? "n/a" : String.format("%.0f°C", value);
     }
 
-    private static String frequency(Long value) {
-        return value == null ? "n/a" : String.format("%.2fGHz", value / 1_000_000_000.0);
-    }
-
     private static String gib(long bytes) {
         return String.format("%.1f", bytes / (1024.0 * 1024 * 1024));
     }
 
     private static String memory(Long bytes) {
         return bytes == null ? "n/a" : gib(bytes) + "GiB";
-    }
-
-    private static String mhz(Long value) {
-        return value == null ? "n/a" : value + "MHz";
-    }
-
-    private static String watts(Double value) {
-        return value == null ? "n/a" : String.format("%.0fW", value);
     }
 
     private static String rate(Double value) {

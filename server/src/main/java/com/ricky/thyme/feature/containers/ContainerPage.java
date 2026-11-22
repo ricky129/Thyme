@@ -25,6 +25,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
@@ -285,12 +286,12 @@ public final class ContainerPage extends Page {
         if (filterQuery.isEmpty()) {
             return list;
         }
-        String q = filterQuery.toLowerCase();
+        String q = filterQuery.toLowerCase(Locale.ROOT);
         List<ContainerSnapshot> result = new ArrayList<>();
         for (ContainerSnapshot c : list) {
-            if ((c.name() != null && c.name().toLowerCase().contains(q))
-                    || (c.image() != null && c.image().toLowerCase().contains(q))
-                    || (c.state() != null && c.state().toLowerCase().contains(q))) {
+            if ((c.name() != null && c.name().toLowerCase(Locale.ROOT).contains(q))
+                    || (c.image() != null && c.image().toLowerCase(Locale.ROOT).contains(q))
+                    || (c.state() != null && c.state().toLowerCase(Locale.ROOT).contains(q))) {
                 result.add(c);
             }
         }
@@ -337,7 +338,7 @@ public final class ContainerPage extends Page {
                     }
                     for (ContainerSnapshot item : next) {
                         ContainerSnapshot old = previous.get(item.id());
-                        String state = item.state().toLowerCase();
+                        String state = item.state().toLowerCase(Locale.ROOT);
                         if (old != null && !old.state().equalsIgnoreCase(item.state())
                                 && ("exited".equals(state) || "stopped".equals(state))) {
                             eventLog.add(new EventLogBuffer.Event(Instant.now(), EventLogBuffer.Severity.WARM,
@@ -432,10 +433,14 @@ public final class ContainerPage extends Page {
         });
     }
 
-    private ContainerSnapshot selectedContainer() {
+    ContainerSnapshot selectedContainer() {
         List<ContainerSnapshot> current = filteredContainers();
         int index = selected.get();
         return index < 0 || index >= current.size() ? null : current.get(index);
+    }
+
+    void setContainers(List<ContainerSnapshot> list) {
+        this.containers.set(list);
     }
 
     @Override
@@ -655,27 +660,35 @@ public final class ContainerPage extends Page {
         int iy = oy + 2;
         int iw = ow - 4;
 
-        Theme.put(graphics, ix, iy++, iw, "Image: " + c.image(), Theme.INK_SECONDARY);
-        Theme.put(graphics, ix, iy++, iw, "ID: " + c.id(), Theme.INK_MUTED);
-        Theme.put(graphics, ix, iy++, iw, "State: " + c.state() + " (" + c.status() + ")",
+        Theme.put(graphics, ix, iy, iw, "Image: " + c.image(), Theme.INK_SECONDARY);
+        iy++;
+        Theme.put(graphics, ix, iy, iw, "ID: " + c.id(), Theme.INK_MUTED);
+        iy++;
+        Theme.put(graphics, ix, iy, iw, "State: " + c.state() + " (" + c.status() + ")",
                 "running".equalsIgnoreCase(c.state()) ? Theme.GOOD : Theme.WARM);
-        Theme.put(graphics, ix, iy++, iw, "Uptime: " + c.runningFor() + "  •  Restarts: " + c.restartCount()
+        iy++;
+        Theme.put(graphics, ix, iy, iw, "Uptime: " + c.runningFor() + "  •  Restarts: " + c.restartCount()
                 + "  •  Exit code: " + (c.exitCode() == null ? "n/a" : c.exitCode()), Theme.INK_SECONDARY);
-        Theme.put(graphics, ix, iy++, iw, "CPU: " + blank(c.cpuPercent()) + "  •  Memory: " + blank(c.memoryUsage())
+        iy++;
+        Theme.put(graphics, ix, iy, iw, "CPU: " + blank(c.cpuPercent()) + "  •  Memory: " + blank(c.memoryUsage())
                 + " (" + blank(c.memoryPercent()) + ")  •  PIDs: " + blank(c.processCount()), Theme.INK_SECONDARY);
-        Theme.put(graphics, ix, iy++, iw, "Network I/O: " + blank(c.networkIo()) + "  •  Block I/O: "
+        iy++;
+        Theme.put(graphics, ix, iy, iw, "Network I/O: " + blank(c.networkIo()) + "  •  Block I/O: "
                 + blank(c.blockIo()), Theme.INK_SECONDARY);
+        iy++;
 
         iy++;
         String logText = logs.get();
         if (logText == null) {
-            Theme.put(graphics, ix, iy++, iw, "Loading recent logs...", Theme.ACCENT);
+            Theme.put(graphics, ix, iy, iw, "Loading recent logs...", Theme.ACCENT);
+            iy++;
         } else {
             List<String> logLines = logText.lines().toList();
-            Theme.put(graphics, ix, iy++, iw, "Recent logs (" + logLines.size()
+            Theme.put(graphics, ix, iy, iw, "Recent logs (" + logLines.size()
                     + " lines, ↑/↓ scroll & expand, ←/→ container):", Theme.ACCENT);
+            iy++;
 
-            int availableLogRows = Math.max(1, (oy + oh - 2) - iy);
+            int availableLogRows = Math.max(1, oy + oh - 2 - iy);
             drawScrollableLogs(graphics, ix, iy, iw, availableLogRows, logLines);
         }
 
@@ -697,7 +710,7 @@ public final class ContainerPage extends Page {
         // Determine view start to ensure selected item is fully visible
         int halfRemaining = Math.max(0, (maxRows - selectedHeight) / 2);
         int start = Math.max(0, sel - halfRemaining);
-        if (start + (maxRows - selectedHeight + 1) > logLines.size()) {
+        if (start + maxRows - selectedHeight + 1 > logLines.size()) {
             start = Math.max(0, logLines.size() - (maxRows - selectedHeight + 1));
         }
 
@@ -705,7 +718,7 @@ public final class ContainerPage extends Page {
         int remainingRows = maxRows;
 
         for (int i = start; i < logLines.size() && remainingRows > 0; i++) {
-            boolean isSelected = (i == sel);
+            boolean isSelected = i == sel;
             String rawLine = logLines.get(i);
             TextColor color = looksLikeError(rawLine) ? Theme.CRITICAL : Theme.INK_MUTED;
 
@@ -713,12 +726,14 @@ public final class ContainerPage extends Page {
                 // Expanded multi-line view with chevron marker
                 for (int sub = 0; sub < wrappedSelected.size() && remainingRows > 0; sub++) {
                     String prefix = (sub == 0) ? "› " : "  ";
-                    Theme.put(graphics, x, curY++, w, prefix + wrappedSelected.get(sub), Theme.ACCENT, true);
+                    Theme.put(graphics, x, curY, w, prefix + wrappedSelected.get(sub), Theme.ACCENT, true);
+                    curY++;
                     remainingRows--;
                 }
             } else {
                 // Single line view
-                Theme.put(graphics, x + 2, curY++, w - 2, rawLine, color);
+                Theme.put(graphics, x + 2, curY, w - 2, rawLine, color);
+                curY++;
                 remainingRows--;
             }
         }

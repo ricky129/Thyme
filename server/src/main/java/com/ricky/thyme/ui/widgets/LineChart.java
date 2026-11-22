@@ -268,7 +268,7 @@ public final class LineChart {
     /** Right-aligned sample lookup over the braille half-columns. */
     private static double sampleAt(double[] samples, int position, int pad, int count) {
         if (position < pad) return Double.NaN;
-        int index = samples.length - count + (position - pad);
+        int index = samples.length - count + position - pad;
         return index >= 0 && index < samples.length ? samples[index] : Double.NaN;
     }
 
@@ -295,7 +295,7 @@ public final class LineChart {
         int count = Math.min(samples.length, capacity);
         int pad = capacity - count;
         int clamped = Math.max(0, Math.min(samples.length - 1, cursor));
-        int position = pad + (clamped - (samples.length - count));
+        int position = pad + clamped - (samples.length - count);
         int column = braille ? position / 2 : position;
         return column >= 0 && column < w ? column : -1;
     }

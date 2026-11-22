@@ -134,10 +134,8 @@ public final class Shell {
     }
 
     private static boolean isHelpKey(KeyStroke key) {
-        if (key.getKeyType() == KeyType.F1) {
-            return true;
-        }
-        return key.getKeyType() == KeyType.Character && key.getCharacter() != null
+        return key.getKeyType() == KeyType.F1
+                || key.getKeyType() == KeyType.Character && key.getCharacter() != null
                 && key.getCharacter() == '?';
     }
 

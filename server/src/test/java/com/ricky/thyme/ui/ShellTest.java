@@ -58,11 +58,17 @@ class ShellTest {
             @Override
             public String title() { return "TestPage"; }
             @Override
-            public void handleKey(com.googlecode.lanterna.input.KeyStroke key) {}
+            public void handleKey(com.googlecode.lanterna.input.KeyStroke key) {
+                // no-op for test
+            }
             @Override
-            public void refresh() {}
+            public void refresh() {
+                // no-op for test
+            }
             @Override
-            public void render(com.googlecode.lanterna.graphics.TextGraphics graphics, TerminalSize size) {}
+            public void render(com.googlecode.lanterna.graphics.TextGraphics graphics, TerminalSize size) {
+                // no-op for test
+            }
             @Override
             public java.util.List<String> helpLines() {
                 return java.util.List.of("  t Test action");
