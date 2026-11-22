@@ -1050,8 +1050,8 @@ public final class DashboardOverviewRenderer {
             }
         }
         String title = (q == null)
-                ? "Events • " + eventLog.size()
-                : "Events • " + entries.size() + "/" + eventLog.size() + " (filtered)";
+                ? "Failed events • " + eventLog.size()
+                : "Failed events • " + entries.size() + "/" + eventLog.size() + " (filtered)";
         EventLog.draw(graphics, x, y, width, height, title, entries);
     }
 

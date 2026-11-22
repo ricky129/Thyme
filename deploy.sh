@@ -187,7 +187,7 @@ if ! ssh "${SSH_OPTS[@]}" "$TARGET" \
 fi
 
 printf '==> Building the client and server runtime...\n'
-PATH="$JAVA_HOME/bin:$PATH" "$SCRIPT_DIR/mvnw" -f "$SCRIPT_DIR/pom.xml" verify
+PATH="$JAVA_HOME/bin:$PATH" "$SCRIPT_DIR/mvnw" -f "$SCRIPT_DIR/pom.xml" clean verify
 
 printf '==> Preparing the remote directory...\n'
 REMOTE_SHELL_DIR="${REMOTE_DIR/#\~/\$HOME}"

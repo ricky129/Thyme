@@ -103,6 +103,7 @@
               <goal>copy-resources</goal>
             </goals>
             <configuration>
+              <overwrite>true</overwrite>
               <outputDirectory>${project.build.directory}/modules</outputDirectory>
               <resources>
                 <resource>

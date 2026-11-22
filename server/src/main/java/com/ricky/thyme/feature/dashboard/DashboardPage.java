@@ -30,9 +30,11 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -92,6 +94,7 @@ public final class DashboardPage extends Page {
             = new AtomicReference<>(List.of());
     private final AtomicBoolean explainer = new AtomicBoolean(false);
     private final AtomicLong generation = new AtomicLong();
+    private final AtomicReference<Set<String>> failedServices = new AtomicReference<>(Set.of());
     private Executor background;
 
     private boolean filteringEvents;
@@ -445,18 +448,21 @@ public final class DashboardPage extends Page {
         Map<String, String> errors = new LinkedHashMap<>();
         try {
             cpu = cpuProvider.read();
+            recordProviderOk("CPU");
         } catch (RuntimeException e) {
             errors.put("CPU", message(e));
             recordProviderError("CPU", message(e));
         }
         try {
             memory = memoryProvider.read();
+            recordProviderOk("RAM");
         } catch (RuntimeException e) {
             errors.put("RAM", message(e));
             recordProviderError("RAM", message(e));
         }
         try {
             disk = diskProvider.read();
+            recordProviderOk("Disks");
         } catch (IOException | RuntimeException e) {
             errors.put("Disks", message(e));
             recordProviderError("Disks", message(e));
@@ -525,7 +531,7 @@ public final class DashboardPage extends Page {
         selectedCore.updateAndGet(value -> Math.max(0, Math.min(value, Math.max(0, coreCount - 1))));
     }
 
-    private void sampleGpu() {
+    void sampleGpu() {
         try {
             GpuReading gpu = gpuProvider.read();
             Double utilization = firstGpuUtilization(gpu);
@@ -534,6 +540,8 @@ public final class DashboardPage extends Page {
             if (!gpu.errors().isEmpty()) {
                 errors.put("GPU", String.join("; ", gpu.errors()));
                 recordProviderError("GPU", errors.get("GPU"));
+            } else {
+                recordProviderOk("GPU");
             }
             updateSnapshot(null, null, gpu, null, null, errors);
             for (GpuSnapshot device : gpu.devices()) {
@@ -549,15 +557,30 @@ public final class DashboardPage extends Page {
         }
     }
 
-    private void sampleServices() {
+    void sampleServices() {
         try {
             List<ServiceSnapshot> services = serviceProvider.list();
             serviceMessage.set(services.size() + " services loaded.");
             selectedService.set(Math.max(0, Math.min(selectedService.get(), services.size() - 1)));
+            Set<String> currentFailed = new HashSet<>();
             for (ServiceSnapshot service : services) {
-                transition("service:" + service.unit(), service.active().equalsIgnoreCase("failed") ? "failed" : "ok",
-                        "Service " + service.unit() + " failed", EventLogBuffer.Severity.CRITICAL);
+                boolean failed = "failed".equalsIgnoreCase(service.active());
+                if (failed) {
+                    currentFailed.add(service.unit());
+                }
+                transition("service:" + service.unit(), failed ? "failed" : "ok",
+                        failed ? "Service " + service.unit() + " failed"
+                                : "Service " + service.unit() + " recovered",
+                        failed ? EventLogBuffer.Severity.CRITICAL : EventLogBuffer.Severity.GOOD);
             }
+            for (String previousFailed : failedServices.getAndSet(Set.copyOf(currentFailed))) {
+                if (!currentFailed.contains(previousFailed)) {
+                    transition("service:" + previousFailed, "ok",
+                            "Service " + previousFailed + " recovered",
+                            EventLogBuffer.Severity.GOOD);
+                }
+            }
+            recordProviderOk("Services");
             updateSnapshot(null, null, null, null, services, Map.of());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -637,23 +660,31 @@ public final class DashboardPage extends Page {
         scheduler.close();
     }
 
-    private void filesystemEvent(DiskSnapshot.Filesystem filesystem) {
-        Double value = filesystem.utilizationPercent();
-        String state = value == null ? "unknown" : value >= 95 ? "critical" : value >= 85 ? "warning" : "ok";
-        transition("filesystem:" + filesystem.mountPoint(), state,
-                "Filesystem " + filesystem.mountPoint() + " above threshold (" + state + ")",
-                "critical".equals(state) ? EventLogBuffer.Severity.CRITICAL : EventLogBuffer.Severity.WARM);
+    void filesystemEvent(DiskSnapshot.Filesystem filesystem) {
+        thresholdEvent("filesystem:" + filesystem.mountPoint(),
+                filesystem.utilizationPercent(), 85, 95,
+                "Filesystem " + filesystem.mountPoint());
     }
 
     private void thresholdEvent(String key, Double value, double warning, double critical, String label) {
         String state = value == null ? "unknown" : value >= critical ? "critical" : value >= warning ? "warning" : "ok";
-        transition(key, state, label + " above threshold (" + state + ")",
-                "critical".equals(state) ? EventLogBuffer.Severity.CRITICAL : EventLogBuffer.Severity.WARM);
+        String message = "ok".equals(state)
+                ? label + " back to normal"
+                : label + " above threshold (" + state + ")";
+        EventLogBuffer.Severity severity = "critical".equals(state) ? EventLogBuffer.Severity.CRITICAL
+                : "warning".equals(state) ? EventLogBuffer.Severity.WARM
+                : EventLogBuffer.Severity.GOOD;
+        transition(key, state, message, severity);
     }
 
     private void recordProviderError(String provider, String detail) {
         transition("provider:" + provider, "error", provider + " provider error: " + detail,
                 EventLogBuffer.Severity.CRITICAL);
+    }
+
+    private void recordProviderOk(String provider) {
+        transition("provider:" + provider, "ok", provider + " provider recovered",
+                EventLogBuffer.Severity.GOOD);
     }
 
     private void transition(String key, String state, String message, EventLogBuffer.Severity severity) {

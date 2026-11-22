@@ -88,7 +88,7 @@ Paths below are relative to the repository root.
 | `server/src/main/java/com/ricky/thyme/feature/dashboard/DashboardPage.java`, `DashboardSnapshot.java` | Collects/composes system metrics and renders the main dashboard. |
 | `server/src/main/java/com/ricky/thyme/feature/cpu/` | CPU snapshot and OSHI provider. |
 | `server/src/main/java/com/ricky/thyme/feature/memory/` | Memory snapshot, OSHI provider, and standalone memory page. |
-| `server/src/main/java/com/ricky/thyme/feature/gpu/` | GPU provider contract, readings/snapshots, NVIDIA command support, and Linux sysfs providers. |
+| `server/src/main/java/com/ricky/thyme/feature/gpu/` | GPU provider contract, readings/snapshots, NVIDIA NVML support via OSHI, and Linux sysfs providers. |
 | `server/src/main/java/com/ricky/thyme/feature/disk/` | Disk/filesystem snapshot and Linux collection provider. |
 | `server/src/main/java/com/ricky/thyme/feature/services/` | systemd service model, provider, and standalone page implementation. |
 | `server/src/main/java/com/ricky/thyme/feature/containers/` | Docker data model/provider and interactive container page. |

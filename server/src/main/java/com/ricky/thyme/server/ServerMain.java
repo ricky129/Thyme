@@ -43,7 +43,7 @@ public final class ServerMain {
 
         var runner = new ProcessCommandRunner();
         var diskProvider = new LinuxDiskProvider(hostRoot, sysRoot, runner);
-        var gpuProvider = new LinuxGpuProvider(runner, sysRoot);
+        var gpuProvider = new LinuxGpuProvider(sysRoot, hostRoot.resolve("proc/driver/nvidia/gpus"));
         var serviceProvider = new ServiceProvider(runner);
         var dashboard = new DashboardPage(
                 new OshiCpuProvider(),
