@@ -11,6 +11,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ShellTest {
@@ -49,5 +50,47 @@ class ShellTest {
             assertEquals(new TerminalSize(40, 12), size);
             assertEquals('X', terminal.getCharacter(39, 11).getCharacter());
         }
+    }
+
+    @Test
+    void togglesHelpOverlayWithQuestionMarkAndEsc() {
+        Page page = new Page() {
+            @Override
+            public String title() { return "TestPage"; }
+            @Override
+            public void handleKey(com.googlecode.lanterna.input.KeyStroke key) {}
+            @Override
+            public void refresh() {}
+            @Override
+            public void render(com.googlecode.lanterna.graphics.TextGraphics graphics, TerminalSize size) {}
+            @Override
+            public java.util.List<String> helpLines() {
+                return java.util.List.of("  t Test action");
+            }
+        };
+
+        Shell shell = new Shell(page);
+        assertFalse(shell.isHelpActive());
+
+        // Press '?' opens help
+        shell.testHandleKey(new com.googlecode.lanterna.input.KeyStroke('?', false, false), Runnable::run);
+        assertTrue(shell.isHelpActive());
+
+        // 'q' does not quit while help is active
+        boolean stillRunning = shell.testHandleKey(new com.googlecode.lanterna.input.KeyStroke('q', false, false), Runnable::run);
+        assertTrue(stillRunning);
+        assertTrue(shell.isHelpActive());
+
+        // Esc closes help
+        shell.testHandleKey(new com.googlecode.lanterna.input.KeyStroke(com.googlecode.lanterna.input.KeyType.Escape), Runnable::run);
+        assertFalse(shell.isHelpActive());
+
+        // F1 opens help
+        shell.testHandleKey(new com.googlecode.lanterna.input.KeyStroke(com.googlecode.lanterna.input.KeyType.F1), Runnable::run);
+        assertTrue(shell.isHelpActive());
+
+        // '?' closes help
+        shell.testHandleKey(new com.googlecode.lanterna.input.KeyStroke('?', false, false), Runnable::run);
+        assertFalse(shell.isHelpActive());
     }
 }

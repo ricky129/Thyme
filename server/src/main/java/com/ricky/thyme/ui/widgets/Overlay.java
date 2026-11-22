@@ -46,6 +46,11 @@ public final class Overlay {
         int ox = (termW - ow) / 2;
         int oy = (termH - oh) / 2;
 
+        // Solid background (like drill-in panels) so content underneath doesn't bleed through
+        g.setBackgroundColor(Theme.SURFACE);
+        g.fillRectangle(new com.googlecode.lanterna.TerminalPosition(ox, oy),
+                new com.googlecode.lanterna.TerminalSize(ow, oh), ' ');
+
         // Border + title
         Panel.draw(g, ox, oy, ow, oh, title);
 

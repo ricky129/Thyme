@@ -1,6 +1,8 @@
 package com.ricky.thyme.feature.dashboard;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.googlecode.lanterna.input.KeyStroke;
 import com.googlecode.lanterna.input.KeyType;
@@ -119,6 +121,28 @@ class DashboardPageTest {
         }
 
         assertEquals(OverviewCard.SYSTEM_CARD_COUNT + 2, page.selectedCard());
+    }
+
+    @Test
+    void filtersEventsInteractively() {
+        DashboardPage page = new DashboardPage(null, null, null, null, null, null);
+        assertFalse(page.capturesGlobalNavigation());
+
+        // Press '/' to start filtering events
+        page.handleKey(new KeyStroke('/', false, false));
+        assertTrue(page.capturesGlobalNavigation());
+
+        // Type 'service'
+        page.handleKey(new KeyStroke('s', false, false));
+        page.handleKey(new KeyStroke('e', false, false));
+
+        // Enter confirms query and exits capture
+        page.handleKey(new KeyStroke(KeyType.Enter));
+        assertFalse(page.capturesGlobalNavigation());
+
+        // Esc clears the query
+        page.handleKey(new KeyStroke(KeyType.Escape));
+        assertFalse(page.capturesGlobalNavigation());
     }
 
     private static com.ricky.thyme.feature.disk.DiskSnapshot diskWithFilesystems() {
