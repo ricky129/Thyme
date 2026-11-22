@@ -88,7 +88,7 @@ public final class LineChart {
             String[] xLabels,
             boolean braille) {
 
-        if (w < 8 || h < 4) return;
+        if (w < 8 || h < 2) return;
 
         // ── Layout ──────────────────────────────────────────────────────────
         int plotX = x + Y_AXIS_WIDTH;
@@ -127,7 +127,7 @@ public final class LineChart {
     public static void drawMulti(TextGraphics g, int x, int y, int w, int h,
             String title, String unit, List<Series> series, double maxValue,
             int cursorIndex, String coverageNote, String[] xLabels, boolean braille) {
-        if (w < 8 || h < 4 || series == null || series.isEmpty()) return;
+        if (w < 8 || h < 2 || series == null || series.isEmpty()) return;
         int plotX = x + Y_AXIS_WIDTH;
         int plotY = y + 1;
         int plotW = w - Y_AXIS_WIDTH;

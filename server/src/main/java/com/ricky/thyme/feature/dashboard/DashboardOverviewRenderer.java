@@ -107,7 +107,7 @@ public final class DashboardOverviewRenderer {
             drawOverview(graphics, size, snapshot, cpuHistory, memoryHistory,
                     temperatureHistory, gpuHistory, diskIoHistory, eventLog, error,
                     selectedCard, List.of());
-            drawDetail(graphics, width, footerY - 2, snapshot, cpuHistory, memoryHistory,
+            drawDetail(graphics, width, footerY, snapshot, cpuHistory, memoryHistory,
                     swapHistory, temperatureHistory, gpuHistory, diskIoHistory, selectedCard,
                     TimeSeriesBuffer.Range.FIFTEEN_MINUTES, -1, false, true, List.of(), 0,
                     new int[0], List.of(), false);
@@ -219,7 +219,7 @@ public final class DashboardOverviewRenderer {
                 temperatureHistory, gpuHistory, diskIoHistory, eventLog, error,
                 selectedCard, filesystems);
         if (details) {
-            drawDetail(graphics, width, height - 3, snapshot, cpuHistory, memoryHistory,
+            drawDetail(graphics, width, height - 1, snapshot, cpuHistory, memoryHistory,
                     swapHistory, temperatureHistory, gpuHistory, diskIoHistory, selectedCard,
                     range, cursor, perCore, explainer, coreHistories, selectedCore, coreCursors,
                     filesystems, filesystemWrite);
@@ -245,12 +245,19 @@ public final class DashboardOverviewRenderer {
             return;
         }
         String label = card.detailLabel();
-        int overlayWidth = Math.max(44, Math.min(width - 4, (int) Math.round(width * 0.85)));
+        // Compact tier (< 100 cols): overlay spans full width so the overview
+        // does not bleed through at the sides and the footer dock is not clipped.
+        boolean fullWidth = width < 100;
+        int overlayWidth = fullWidth ? width
+                : Math.max(44, Math.min(width - 4, (int) Math.round(width * 0.85)));
         int overlayHeight = Math.max(11, Math.min(height - 1, (int) Math.round(height * 0.90)));
-        int x = (width - overlayWidth) / 2;
+        int x = fullWidth ? 0 : (width - overlayWidth) / 2;
         int y = Math.max(2, (height - overlayHeight) / 2 + 1);
         graphics.setBackgroundColor(Theme.SURFACE);
-        graphics.fillRectangle(new TerminalPosition(x, y), new TerminalSize(overlayWidth, overlayHeight), ' ');
+        // Full-width overlays clear the whole area below the header to avoid
+        // overview residue (panel borders) showing outside the overlay rect.
+        int fillHeight = fullWidth ? height - y : overlayHeight;
+        graphics.fillRectangle(new TerminalPosition(x, y), new TerminalSize(overlayWidth, fillHeight), ' ');
         Panel.draw(graphics, x, y, overlayWidth, overlayHeight, label + "  ·  Esc close");
         int innerX = x + 2;
         int innerW = overlayWidth - 4;
@@ -367,12 +374,18 @@ public final class DashboardOverviewRenderer {
     private static void drawFilesystemDetail(TextGraphics graphics, int width, int height,
             List<FilesystemSeries> filesystems, OverviewCard card,
             TimeSeriesBuffer.Range range, int cursor, boolean explainer, boolean write) {
-        int overlayWidth = Math.max(44, Math.min(width - 4, (int) Math.round(width * 0.85)));
+        // Compact tier (< 100 cols): overlay spans full width (R10 / spec §4).
+        boolean fullWidth = width < 100;
+        int overlayWidth = fullWidth ? width
+                : Math.max(44, Math.min(width - 4, (int) Math.round(width * 0.85)));
         int overlayHeight = Math.max(11, Math.min(height - 1, (int) Math.round(height * 0.90)));
-        int x = (width - overlayWidth) / 2;
+        int x = fullWidth ? 0 : (width - overlayWidth) / 2;
         int y = Math.max(2, (height - overlayHeight) / 2 + 1);
         graphics.setBackgroundColor(Theme.SURFACE);
-        graphics.fillRectangle(new TerminalPosition(x, y), new TerminalSize(overlayWidth, overlayHeight), ' ');
+        // Full-width overlays clear the whole area below the header to avoid
+        // overview residue (panel borders) showing outside the overlay rect.
+        int fillHeight = fullWidth ? height - y : overlayHeight;
+        graphics.fillRectangle(new TerminalPosition(x, y), new TerminalSize(overlayWidth, fillHeight), ' ');
         Panel.draw(graphics, x, y, overlayWidth, overlayHeight,
                 "Disk I/O  ·  " + card.detailLabel() + "  ·  Esc close");
         int innerX = x + 2;
@@ -606,10 +619,26 @@ public final class DashboardOverviewRenderer {
                 LineChart.draw(graphics, cellX, cellY, actualWidth, actualHeight, title, "%",
                         samples, axisMaximum(0, samples, actualWidth), Theme.CPU_SERIES, cursor,
                         null, timeLabels(range), Theme.BRAILLE);
+                if (cursor >= 0 && cursor < samples.length && !Double.isNaN(samples[cursor])) {
+                    String readout = "▸ cursor " + formatMetric(samples[cursor], 0);
+                    int titleLen = title.length();
+                    int avail = actualWidth - titleLen - 1;
+                    if (avail >= readout.length()) {
+                        Theme.put(graphics, cellX + titleLen + 1, cellY, avail, readout, Theme.ACCENT, true);
+                    }
+                }
             } else {
                 Panel.draw(graphics, cellX, cellY, actualWidth, actualHeight, title);
                 Sparkline.draw(graphics, cellX + 1, cellY + 1, actualWidth - 2,
                         samples, Theme.CPU_SERIES, false);
+                if (cursor >= 0 && cursor < samples.length && !Double.isNaN(samples[cursor])) {
+                    String readout = "▸ cursor " + formatMetric(samples[cursor], 0);
+                    int titleLen = title.length() + 2; // Panel has borders
+                    int avail = actualWidth - titleLen - 2;
+                    if (avail >= readout.length()) {
+                        Theme.put(graphics, cellX + titleLen, cellY, avail, readout, Theme.ACCENT, true);
+                    }
+                }
             }
         }
     }
@@ -918,10 +947,13 @@ public final class DashboardOverviewRenderer {
 
     private static void drawCharts(TextGraphics graphics, int x, int y, int width, int height,
             TimeSeriesBuffer cpuHistory, TimeSeriesBuffer memoryHistory, String error) {
-        if (width < 20 || height < 4)
+        if (width < 20 || height < 3)
             return;
-        int firstHeight = Math.max(4, height / 2);
-        Panel.draw(graphics, x, y, width, firstHeight, "CPU • 15M");
+        // When height is too tight to split (< 8 rows), show a single CPU panel.
+        // The spec §C (80x24) keeps both panels; we split whenever there is room.
+        boolean split = height >= 8;
+        int firstHeight = split ? Math.max(4, height / 2) : height;
+        Panel.draw(graphics, x, y, width, firstHeight, split ? "CPU • 15M" : "CPU / RAM • 15M");
         if (error != null) {
             Theme.put(graphics, x + 2, y + 2, width - 4, error, Theme.CRITICAL);
         } else {
@@ -939,7 +971,7 @@ public final class DashboardOverviewRenderer {
         }
         int secondY = y + firstHeight + 1;
         int secondHeight = height - firstHeight - 1;
-        if (secondHeight >= 4) {
+        if (split && secondHeight >= 3) {
             Panel.draw(graphics, x, secondY, width, secondHeight, "RAM • 15M");
             boolean legend = secondHeight >= 9;
             int chartHeight = secondHeight - 2 - (legend ? 1 : 0);

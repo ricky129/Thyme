@@ -67,7 +67,7 @@ class UiSnapshotTest {
         DashboardSnapshot snapshot = snapshotWithCores();
         List<TimeSeriesBuffer> cores = List.of(history(10, 900), history(20, 900),
                 history(30, 900), history(40, 900));
-        int[] cursors = {899, -1, 120, -1};
+        int[] cursors = {89, -1, 50, -1};
         for (TerminalSize size : SIZES) {
             writeSnapshot("per-core", size, (graphics, terminalSize) ->
                     DashboardOverviewRenderer.draw(graphics, terminalSize, snapshot,
@@ -78,9 +78,12 @@ class UiSnapshotTest {
         }
         Path snapshotFile = Path.of("target", "ui-snapshots", "per-core-120x35.txt");
         assertTrue(Files.exists(snapshotFile));
-        assertEquals(1, Files.readString(snapshotFile).lines()
+        String content = Files.readString(snapshotFile);
+        assertEquals(1, content.lines()
                 .filter(line -> line.contains("history covers 18s of 1h"))
                 .count());
+        assertTrue(content.contains("Core 0 ▸ cursor"));
+        assertTrue(content.contains("Core 2 * ▸ cursor"));
     }
 
     @Test
