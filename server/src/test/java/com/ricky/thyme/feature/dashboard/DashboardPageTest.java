@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 class DashboardPageTest {
     @Test
     void directionalKeysMoveAcrossKpiCardsWithoutChangingPage() {
-        DashboardPage page = new DashboardPage(null, null, null, null, null);
+        DashboardPage page = new DashboardPage(null, null, null, null, null, null);
 
         page.handleKey(new KeyStroke(KeyType.ArrowRight));
         page.handleKey(new KeyStroke(KeyType.ArrowDown));
@@ -24,7 +24,7 @@ class DashboardPageTest {
 
     @Test
     void enterOpensAndEscapeClosesCardDetails() {
-        DashboardPage page = new DashboardPage(null, null, null, null, null);
+        DashboardPage page = new DashboardPage(null, null, null, null, null, null);
 
         page.handleKey(new KeyStroke(KeyType.Enter));
         assertEquals(true, page.showingDetails());
@@ -34,7 +34,7 @@ class DashboardPageTest {
 
     @Test
     void detailKeysChangeRangeAndSelectorWithoutLeavingTheOverlay() {
-        DashboardPage page = new DashboardPage(null, null, null, null, null);
+        DashboardPage page = new DashboardPage(null, null, null, null, null, null);
         page.handleKey(new KeyStroke(KeyType.Enter));
         page.handleKey(new KeyStroke(']', false, false));
         assertEquals(com.ricky.thyme.feature.telemetry.TimeSeriesBuffer.Range.ONE_HOUR, page.detailRange());
@@ -46,7 +46,7 @@ class DashboardPageTest {
 
     @Test
     void cursorStaysHiddenAtNewestUntilMovingLeft() {
-        DashboardPage page = new DashboardPage(null, null, null, null, null);
+        DashboardPage page = new DashboardPage(null, null, null, null, null, null);
         page.handleKey(new KeyStroke(KeyType.Enter));
         page.handleKey(new KeyStroke('l', false, false));
         assertEquals(-1, page.detailCursor());
@@ -56,7 +56,7 @@ class DashboardPageTest {
 
     @Test
     void arrowsMoveBetweenDrillInsWhileOpen() {
-        DashboardPage page = new DashboardPage(null, null, null, null, null);
+        DashboardPage page = new DashboardPage(null, null, null, null, null, null);
         page.handleKey(new KeyStroke(KeyType.Enter));
         assertEquals(true, page.showingDetails());
 
@@ -72,7 +72,7 @@ class DashboardPageTest {
 
     @Test
     void detailCapturesTabBeforeRootPageNavigation() {
-        DashboardPage page = new DashboardPage(null, null, null, null, null);
+        DashboardPage page = new DashboardPage(null, null, null, null, null, null);
         assertEquals(false, page.capturesGlobalNavigation());
         page.handleKey(new KeyStroke(KeyType.Enter));
         assertEquals(true, page.capturesGlobalNavigation());
@@ -80,7 +80,7 @@ class DashboardPageTest {
 
     @Test
     void eachFilesystemCardOpensItsOwnDrillIn() {
-        DashboardPage page = new DashboardPage(null, null, null, null, null);
+        DashboardPage page = new DashboardPage(null, null, null, null, null, null);
         page.updateSnapshot(null, null, null, diskWithFilesystems(), null, Map.of());
 
         for (int index = 0; index < 5; index++) {
@@ -111,7 +111,7 @@ class DashboardPageTest {
 
     @Test
     void clampsCardSelectionToTheFilesystemCardCount() {
-        DashboardPage page = new DashboardPage(null, null, null, null, null);
+        DashboardPage page = new DashboardPage(null, null, null, null, null, null);
         page.updateSnapshot(null, null, null, diskWithFilesystems(), null, Map.of());
 
         for (int index = 0; index < 20; index++) {

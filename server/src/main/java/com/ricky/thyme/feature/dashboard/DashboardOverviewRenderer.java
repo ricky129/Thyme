@@ -296,6 +296,7 @@ public final class DashboardOverviewRenderer {
                     Theme.INK_MUTED);
             return;
         }
+        boolean compact = overlayHeight < 20;
         double[] samples = history == null ? new double[0] : history.samples(range);
         int chartY = y + 4;
         int chartHeight = Math.max(4, overlayHeight - (explainer ? 13 : 10));
@@ -304,19 +305,25 @@ public final class DashboardOverviewRenderer {
                 ? Math.max(axisMaximum(1, samples, overlayWidth - 2),
                         axisMaximum(1, swapSamples, overlayWidth - 2))
                 : axisMaximum(selectedCard, samples, overlayWidth - 2);
+        int noteY = chartY + chartHeight;
         if (history == null) {
             Theme.put(graphics, innerX, chartY, innerW, "history unavailable for this metric", Theme.INK_MUTED);
         } else {
+            String coverage = history.coverageNote(range);
             if (selectedCard == 1) {
                 LineChart.drawMulti(graphics, x + 1, chartY, overlayWidth - 2, chartHeight, label,
                         chartUnit(selectedCard), List.of(
                                 new LineChart.Series("used", samples, Theme.MEMORY_SERIES, false),
                                 new LineChart.Series("swap", swapSamples, Theme.SWAP_SERIES, true)),
-                        max, cursor, history.coverageNote(range), Theme.BRAILLE);
+                        max, cursor, compact ? coverage : null, timeLabels(range), Theme.BRAILLE);
             } else {
                 LineChart.draw(graphics, x + 1, chartY, overlayWidth - 2, chartHeight, label,
                         chartUnit(selectedCard), samples, max, seriesColor(selectedCard), cursor,
-                        history.coverageNote(range), Theme.BRAILLE);
+                        compact ? coverage : null, timeLabels(range), Theme.BRAILLE);
+            }
+            if (!compact) {
+                drawLegend(graphics, innerX, noteY, innerW, legendFor(selectedCard), coverage);
+                noteY++;
             }
             if (cursor >= 0 && cursor < samples.length && !Double.isNaN(samples[cursor])) {
                 String readout = "▸ cursor " + formatMetric(samples[cursor], selectedCard);
@@ -324,10 +331,11 @@ public final class DashboardOverviewRenderer {
                         && !Double.isNaN(swapSamples[cursor])) {
                     readout = readout + "   swap " + formatMetric(swapSamples[cursor], 1);
                 }
-                Theme.put(graphics, innerX, chartY + chartHeight, innerW, readout, Theme.ACCENT);
+                Theme.put(graphics, innerX, noteY, innerW, readout, Theme.ACCENT);
+                noteY++;
             }
         }
-        int detailY = chartY + chartHeight + 1;
+        int detailY = noteY;
         if (explainer && detailY < y + overlayHeight - 2) {
             Panel.draw(graphics, innerX, detailY, innerW, 3, "What is " + label + "?");
             Theme.put(graphics, innerX + 1, detailY + 1, innerW - 2, explanation(selectedCard), Theme.INK_SECONDARY);
@@ -383,12 +391,13 @@ public final class DashboardOverviewRenderer {
                 + "   Active " + activeText(filesystem.utilizationPercent()), Theme.INK);
         TimeSeriesBuffer history = write ? filesystem.writeHistory() : filesystem.readHistory();
         String coverage = history.coverageNote(range);
+        boolean compact = overlayHeight < 20;
         Theme.put(graphics, innerX, y + 3, innerW,
-                rangeTabs(range) + (coverage == null ? "" : "  " + coverage)
+                rangeTabs(range)
+                + (compact && coverage != null ? "  " + coverage : "")
                 + "   I/O: " + (write ? "Read [Write]" : "[Read] Write") + " (↑↓)",
                 Theme.INK_SECONDARY);
         int chartY = y + 4;
-        boolean compact = overlayHeight < 20;
         int chartHeight = compact
                 ? Math.max(3, overlayHeight - 5)
                 : Math.max(4, overlayHeight - (explainer ? 13 : 10));
@@ -398,8 +407,13 @@ public final class DashboardOverviewRenderer {
         LineChart.draw(graphics, x + 1, chartY, overlayWidth - 2, chartHeight,
                 filesystem.mountPoint() + " · " + series, "M/s", samples,
                 adaptiveMaximum(samples, overlayWidth - 2, 0.1, 0),
-                seriesColor, cursor, null, Theme.BRAILLE);
-        int detailY = chartY + chartHeight + 1;
+                seriesColor, cursor, null, timeLabels(range), Theme.BRAILLE);
+        int noteY = chartY + chartHeight;
+        if (!compact) {
+            drawLegend(graphics, innerX, noteY, innerW, "● " + series, coverage);
+            noteY++;
+        }
+        int detailY = noteY;
         if (cursor >= 0 && cursor < samples.length) {
             String readout = "▸ " + filesystem.mountPoint()
                     + "  " + series + " " + mibRate(mibAt(samples, cursor));
@@ -591,13 +605,43 @@ public final class DashboardOverviewRenderer {
             if (actualHeight >= 6) {
                 LineChart.draw(graphics, cellX, cellY, actualWidth, actualHeight, title, "%",
                         samples, axisMaximum(0, samples, actualWidth), Theme.CPU_SERIES, cursor,
-                        null, Theme.BRAILLE);
+                        null, timeLabels(range), Theme.BRAILLE);
             } else {
                 Panel.draw(graphics, cellX, cellY, actualWidth, actualHeight, title);
                 Sparkline.draw(graphics, cellX + 1, cellY + 1, actualWidth - 2,
                         samples, Theme.CPU_SERIES, false);
             }
         }
+    }
+
+    /** Legend on the left and the coverage note on the right of the note row. */
+    private static void drawLegend(TextGraphics graphics, int x, int y, int width,
+            String legend, String note) {
+        Theme.put(graphics, x, y, width, legend, Theme.INK_SECONDARY);
+        if (note == null) {
+            return;
+        }
+        int noteX = Math.max(x + legend.length() + 2, x + width - note.length());
+        Theme.put(graphics, noteX, y, Math.max(0, x + width - noteX), note, Theme.INK_MUTED);
+    }
+
+    /** X-axis labels for the selected range, newest at the right edge. */
+    private static String[] timeLabels(TimeSeriesBuffer.Range range) {
+        return switch (range) {
+            case FIFTEEN_MINUTES -> new String[]{"-15m", "-10m", "-5m", "now"};
+            case ONE_HOUR -> new String[]{"-1h", "-40m", "-20m", "now"};
+            case SIX_HOURS -> new String[]{"-6h", "-4h", "-2h", "now"};
+        };
+    }
+
+    private static String legendFor(int card) {
+        return switch (card) {
+            case 0 -> "● total";
+            case 1 -> "● used   ○ swap";
+            case 2 -> "● temperature";
+            case 3 -> "● gpu";
+            default -> "● disk I/O";
+        };
     }
 
     private static String rangeTabs(TimeSeriesBuffer.Range range) {
@@ -690,15 +734,36 @@ public final class DashboardOverviewRenderer {
     }
 
     private static void drawHeader(TextGraphics graphics, int width, DashboardSnapshot snapshot) {
-        String host = System.getenv().getOrDefault("HOSTNAME", "host");
+        String hostname = snapshot == null || snapshot.host() == null
+                ? "host" : snapshot.host().hostname();
         String status = snapshot == null ? "○" : "●";
-        TextColor statusColor = snapshot == null ? Theme.WARM : healthColor(snapshot);
-        Theme.put(graphics, 1, 0, width - 2, "THYME  " + Theme.clipToWidth(host, 20), Theme.INK, true);
-        Theme.put(graphics, Math.max(1, width - 35), 0, 34,
-                status + "  up  LIVE • " + (snapshot == null ? "--:--:--" : CLOCK.format(snapshot.sampledAt())),
-                statusColor);
+        String clock = snapshot == null ? "--:--:--" : CLOCK.format(snapshot.sampledAt());
+        String uptime = snapshot == null || snapshot.host() == null
+                ? "up --" : uptime(snapshot.host().uptimeSeconds());
+        String right = width >= 100
+                ? status + "  " + uptime + "  LIVE • " + clock
+                : status + "  " + uptime + "  LIVE " + clock;
+        int rightX = Math.max(1, width - right.length() - 1);
+        Theme.put(graphics, 1, 0, Math.max(0, rightX - 2),
+                "THYME  " + hostname, Theme.INK, true);
+        Theme.put(graphics, rightX, 0, Math.max(0, width - rightX - 1), right,
+                snapshot == null ? Theme.WARM : healthColor(snapshot));
         graphics.setForegroundColor(Theme.HAIRLINE);
         graphics.drawLine(0, 1, width - 1, 1, Theme.H);
+    }
+
+    /** Short uptime label: {@code up 12d 4h}, {@code up 4h 20m} or {@code up 12m}. */
+    private static String uptime(long seconds) {
+        long days = seconds / 86400;
+        long hours = seconds % 86400 / 3600;
+        long minutes = seconds % 3600 / 60;
+        if (days > 0) {
+            return "up " + days + "d" + (hours > 0 ? " " + hours + "h" : "");
+        }
+        if (hours > 0) {
+            return "up " + hours + "h" + (minutes > 0 ? " " + minutes + "m" : "");
+        }
+        return "up " + Math.max(1, minutes) + "m";
     }
 
     private static void drawFooter(TextGraphics graphics, int width, int y) {
@@ -722,7 +787,8 @@ public final class DashboardOverviewRenderer {
             LineChart.draw(graphics, 1, chartY + 1, width - 2, chartHeight - 2,
                     "CPU / RAM", "%", samples, axisMaximum(0, samples, width - 2),
                     Theme.CPU_SERIES, -1,
-                    cpuHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), Theme.BRAILLE);
+                    cpuHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES),
+                    timeLabels(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), Theme.BRAILLE);
         }
     }
 
@@ -859,21 +925,33 @@ public final class DashboardOverviewRenderer {
         if (error != null) {
             Theme.put(graphics, x + 2, y + 2, width - 4, error, Theme.CRITICAL);
         } else {
+            boolean legend = firstHeight >= 9;
+            int chartHeight = firstHeight - 2 - (legend ? 1 : 0);
             double[] samples = cpuHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
-            LineChart.draw(graphics, x + 1, y + 1, width - 2, firstHeight - 2, "CPU", "%",
+            String coverage = cpuHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
+            LineChart.draw(graphics, x + 1, y + 1, width - 2, chartHeight, "CPU", "%",
                     samples, axisMaximum(0, samples, width - 2),
-                    Theme.CPU_SERIES, -1,
-                    cpuHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), Theme.BRAILLE);
+                    Theme.CPU_SERIES, -1, legend ? null : coverage,
+                    timeLabels(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), Theme.BRAILLE);
+            if (legend) {
+                drawLegend(graphics, x + 2, y + 1 + chartHeight, width - 4, "● total", coverage);
+            }
         }
         int secondY = y + firstHeight + 1;
         int secondHeight = height - firstHeight - 1;
         if (secondHeight >= 4) {
             Panel.draw(graphics, x, secondY, width, secondHeight, "RAM • 15M");
+            boolean legend = secondHeight >= 9;
+            int chartHeight = secondHeight - 2 - (legend ? 1 : 0);
             double[] samples = memoryHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
-            LineChart.draw(graphics, x + 1, secondY + 1, width - 2, secondHeight - 2, "RAM", "%",
+            String coverage = memoryHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
+            LineChart.draw(graphics, x + 1, secondY + 1, width - 2, chartHeight, "RAM", "%",
                     samples, axisMaximum(1, samples, width - 2),
-                    Theme.MEMORY_SERIES, -1,
-                    memoryHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), Theme.BRAILLE);
+                    Theme.MEMORY_SERIES, -1, legend ? null : coverage,
+                    timeLabels(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), Theme.BRAILLE);
+            if (legend) {
+                drawLegend(graphics, x + 2, secondY + 1 + chartHeight, width - 4, "● used", coverage);
+            }
         }
     }
 

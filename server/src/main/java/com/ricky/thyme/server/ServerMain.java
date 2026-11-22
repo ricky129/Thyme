@@ -7,6 +7,7 @@ import com.ricky.thyme.feature.cpu.OshiCpuProvider;
 import com.ricky.thyme.feature.dashboard.DashboardPage;
 import com.ricky.thyme.feature.disk.LinuxDiskProvider;
 import com.ricky.thyme.feature.gpu.LinuxGpuProvider;
+import com.ricky.thyme.feature.host.OshiHostProvider;
 import com.ricky.thyme.feature.memory.OshiMemoryProvider;
 import com.ricky.thyme.feature.services.ServiceProvider;
 import com.ricky.thyme.ui.Shell;
@@ -47,7 +48,7 @@ public final class ServerMain {
         var dashboard = new DashboardPage(
                 new OshiCpuProvider(),
                 new OshiMemoryProvider(),
-                gpuProvider, diskProvider, serviceProvider);
+                gpuProvider, diskProvider, serviceProvider, new OshiHostProvider());
         var containers = new ContainerPage(new ContainerProvider(runner));
         new Shell(new PageRegistry(java.util.List.of(
                 new PageRegistry.Entry("overview", dashboard),
@@ -55,11 +56,17 @@ public final class ServerMain {
     }
 
     static Path configuredHostRoot(String hostRootValue) throws IOException {
-        if (hostRootValue == null || hostRootValue.isBlank())
-            throw new IOException("THYME_HOST_ROOT is not set");
+        // If the environment variable is missing, fall back to the real filesystem root ("/")
+        // which always contains the host's "proc" and "sys" directories. This preserves the
+        // original behaviour when the server was started via the wrapper scripts that
+        // exported THYME_HOST_ROOT=$(pwd).
+        if (hostRootValue == null || hostRootValue.isBlank()) {
+            hostRootValue = "/";
+        }
         Path hostRoot = Path.of(hostRootValue).toAbsolutePath().normalize();
         Path proc = hostRoot.resolve("proc");
         Path sys = hostRoot.resolve("sys");
+        // Verify that the required proc and sys directories are present.
         if (!Files.isDirectory(proc)
                 || !Files.isDirectory(sys)
                 || !Files.isDirectory(Path.of("/sys")))

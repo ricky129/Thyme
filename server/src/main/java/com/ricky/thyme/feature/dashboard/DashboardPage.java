@@ -13,6 +13,8 @@ import com.ricky.thyme.feature.disk.DiskSnapshot;
 import com.ricky.thyme.feature.gpu.GpuProvider;
 import com.ricky.thyme.feature.gpu.GpuReading;
 import com.ricky.thyme.feature.gpu.GpuSnapshot;
+import com.ricky.thyme.feature.host.HostProvider;
+import com.ricky.thyme.feature.host.HostSnapshot;
 import com.ricky.thyme.feature.memory.MemorySnapshot;
 import com.ricky.thyme.feature.memory.OshiMemoryProvider;
 import com.ricky.thyme.feature.services.ServiceProvider;
@@ -62,6 +64,7 @@ public final class DashboardPage extends Page {
     private final GpuProvider gpuProvider;
     private final DiskProvider diskProvider;
     private final ServiceProvider serviceProvider;
+    private final HostProvider hostProvider;
     private final AtomicReference<DashboardSnapshot> snapshot = new AtomicReference<>();
     private final TimeSeriesBuffer cpuHistory = new TimeSeriesBuffer();
     private final TimeSeriesBuffer memoryHistory = new TimeSeriesBuffer();
@@ -102,12 +105,14 @@ public final class DashboardPage extends Page {
             OshiMemoryProvider memoryProvider,
             GpuProvider gpuProvider,
             DiskProvider diskProvider,
-            ServiceProvider serviceProvider) {
+            ServiceProvider serviceProvider,
+            HostProvider hostProvider) {
         this.cpuProvider = cpuProvider;
         this.memoryProvider = memoryProvider;
         this.gpuProvider = gpuProvider;
         this.diskProvider = diskProvider;
         this.serviceProvider = serviceProvider;
+        this.hostProvider = hostProvider;
     }
 
     private static TextColor rgb(int red, int green, int blue) {
@@ -379,7 +384,20 @@ public final class DashboardPage extends Page {
                 filesystemEvent(fs);
             }
         }
-        updateSnapshot(cpu, memory, null, disk, null, errors);
+        updateSnapshot(cpu, memory, null, disk, null, errors, readHost());
+    }
+
+    /** Reads the header identity; a failure keeps the previous values instead of failing the page. */
+    private HostSnapshot readHost() {
+        if (hostProvider == null) {
+            return snapshot.get() == null ? null : snapshot.get().host();
+        }
+        try {
+            return hostProvider.read();
+        } catch (RuntimeException ignored) {
+            // Host identity is cosmetic: keep the last good values.
+            return snapshot.get() == null ? null : snapshot.get().host();
+        }
     }
 
     private void appendCoreHistories(CpuSnapshot cpu) {
@@ -453,11 +471,18 @@ public final class DashboardPage extends Page {
 
     void updateSnapshot(CpuSnapshot cpu, MemorySnapshot memory, GpuReading gpu,
             DiskSnapshot disk, List<ServiceSnapshot> services, Map<String, String> errors) {
+        updateSnapshot(cpu, memory, gpu, disk, services, errors, null);
+    }
+
+    void updateSnapshot(CpuSnapshot cpu, MemorySnapshot memory, GpuReading gpu,
+            DiskSnapshot disk, List<ServiceSnapshot> services, Map<String, String> errors,
+            HostSnapshot host) {
         DashboardSnapshot old = snapshot.get();
         snapshot.set(new DashboardSnapshot(Instant.now(), cpu != null ? cpu : old == null ? null : old.cpu(),
                 memory != null ? memory : old == null ? null : old.memory(), gpu != null ? gpu : old == null ? null : old.gpu(),
                 disk != null ? disk : old == null ? null : old.disk(), services != null ? services : old == null ? List.of() : old.services(),
-                errors.isEmpty() && old != null ? old.errors() : errors));
+                errors.isEmpty() && old != null ? old.errors() : errors,
+                host != null ? host : old == null ? null : old.host()));
         pageError.set(errors.isEmpty() ? null : errors.values().iterator().next());
     }
 

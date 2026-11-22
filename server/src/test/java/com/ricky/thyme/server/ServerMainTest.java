@@ -14,7 +14,8 @@ class ServerMainTest {
 
     @Test
     void requiresTheHostRootAndAcceptsAValidRoot() throws IOException {
-        assertThrows(IOException.class, () -> ServerMain.configuredHostRoot(null));
+        // When THYME_HOST_ROOT is not set the method falls back to "/".
+        assertEquals(Path.of("/").toAbsolutePath(), ServerMain.configuredHostRoot(null));
 
         Path root = tempDir.resolve("host");
         java.nio.file.Files.createDirectories(root.resolve("proc"));

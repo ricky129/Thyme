@@ -12,8 +12,9 @@ import com.ricky.thyme.ui.Theme;
  * <h2>Layout (example, 20×4)</h2>
  * <pre>
  *   ╭──────────────────╮
- *   │ CPU %  › ▄▆█▃▅▇  │
- *   │ 42%               │
+ *   │ CPU %  ›          │
+ *   │ 42%       ▄▆█▃▅▇  │
+ *   │ current           │
  *   ╰──────────────────╯
  * </pre>
  */
@@ -91,21 +92,20 @@ public final class StatCard {
 
         if (iw <= 0 || ih <= 0) return;
 
-        // Row 0: label [›] [sparkline]
+        // Row 0: label [›]
         String labelStr = drillable ? (label + " ›") : label;
-        int labelLen = Math.min(labelStr.length(), iw);
-        Theme.put(g, ix, iy, labelLen, labelStr, Theme.INK_SECONDARY, true);
+        Theme.put(g, ix, iy, iw, labelStr, Theme.INK_SECONDARY, true);
 
-        // Sparkline inline to the right of label
-        int sparkWidth = iw - labelLen - 1;
-        if (sparkWidth > 1 && history != null && history.length > 0) {
-            String spark = buildSparkline(history, sparkWidth);
-            Theme.put(g, ix + labelLen + 1, iy, sparkWidth, spark, sparkColor);
-        }
-
-        // Row 1: value (large)
+        // Row 1: value (large) with the sparkline inline on the right
         if (ih >= 2) {
-            Theme.put(g, ix, iy + 1, iw, value != null ? value : "n/a", valueColor, true);
+            String valueStr = value != null ? value : "n/a";
+            int valueWidth = Math.min(valueStr.length(), iw);
+            Theme.put(g, ix, iy + 1, valueWidth, valueStr, valueColor, true);
+            int sparkWidth = iw - valueWidth - 2;
+            if (sparkWidth >= 3 && history != null && history.length > 0) {
+                String spark = buildSparkline(history, sparkWidth);
+                Theme.put(g, ix + iw - sparkWidth, iy + 1, sparkWidth, spark, sparkColor);
+            }
         }
 
         // Row 2: caption (muted)

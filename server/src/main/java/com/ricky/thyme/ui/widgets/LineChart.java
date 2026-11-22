@@ -13,9 +13,9 @@ import java.util.Locale;
  * <p>Features:
  * <ul>
  *   <li>Labelled Y-axis on the left.</li>
- *   <li>Labelled X-axis (timestamps) on the bottom.</li>
- *   <li>Movable crosshair: a vertical bar at a logical cursor position with
- *       the sample value rendered below the chart.</li>
+ *   <li>Labelled X-axis with time labels ({@code -15m … now}) on the bottom.</li>
+ *   <li>Movable crosshair: a dotted column with a {@code ●} marker on the
+ *       sample's value row.</li>
  *   <li>Coverage note ("history covers Xm of 15M") when fewer samples than
  *       the selected interval are available.</li>
  * </ul>
@@ -29,6 +29,7 @@ public final class LineChart {
 
     private static final int Y_AXIS_WIDTH = 5; // "100% " or " n/a "
     private static final int X_AXIS_HEIGHT = 1;
+    private static final int X_LABEL_HEIGHT = 1;
 
     /** Braille bits for the left and right column of a 2x4 cell, bottom-up. */
     private static final int[] LEFT_DOTS = {0x40, 0x04, 0x02, 0x01};
@@ -65,6 +66,27 @@ public final class LineChart {
             int cursorIndex,
             String coverageNote,
             boolean braille) {
+        draw(g, x, y, w, h, title, unit, samples, maxValue, color, cursorIndex,
+                coverageNote, null, braille);
+    }
+
+    /**
+     * Draws the chart with optional x-axis time labels (for example
+     * {@code -15m}, {@code -10m}, {@code now}).  Labels are dropped when the
+     * chart is too short, so the plot keeps its minimum height.
+     */
+    public static void draw(
+            TextGraphics g,
+            int x, int y, int w, int h,
+            String title,
+            String unit,
+            double[] samples,
+            double maxValue,
+            TextColor color,
+            int cursorIndex,
+            String coverageNote,
+            String[] xLabels,
+            boolean braille) {
 
         if (w < 8 || h < 4) return;
 
@@ -72,7 +94,8 @@ public final class LineChart {
         int plotX = x + Y_AXIS_WIDTH;
         int plotY = y + 1; // row 0 = title
         int plotW = w - Y_AXIS_WIDTH;
-        int plotH = h - 1 - X_AXIS_HEIGHT; // minus title row and X-axis row
+        boolean showXLabels = xLabels != null && xLabels.length > 0 && h >= 6;
+        int plotH = h - 1 - X_AXIS_HEIGHT - (showXLabels ? X_LABEL_HEIGHT : 0);
         if (plotW < 2 || plotH < 1) return;
 
         // ── Title row ───────────────────────────────────────────────────────
@@ -88,32 +111,33 @@ public final class LineChart {
         // ── Plot area ───────────────────────────────────────────────────────
         drawPlot(g, plotX, plotY, plotW, plotH, samples, maxValue, color, cursorIndex, braille);
 
-        // ── X-axis (timestamps placeholder) ─────────────────────────────────
-        int xAxisY = plotY + plotH;
-        g.setForegroundColor(Theme.BASELINE);
-        // Draw a simple horizontal axis line
-        for (int col = plotX; col < plotX + plotW; col++) {
-            g.putString(col, xAxisY, "─");
-        }
+        // ── X-axis ──────────────────────────────────────────────────────────
+        drawXAxis(g, plotX, plotY + plotH, plotW, showXLabels ? xLabels : null);
     }
 
     /** Draws multiple series sharing one axis and one crosshair. */
     public static void drawMulti(TextGraphics g, int x, int y, int w, int h,
             String title, String unit, List<Series> series, double maxValue,
             int cursorIndex, String coverageNote, boolean braille) {
+        drawMulti(g, x, y, w, h, title, unit, series, maxValue, cursorIndex,
+                coverageNote, null, braille);
+    }
+
+    /** Draws multiple series with optional x-axis time labels. */
+    public static void drawMulti(TextGraphics g, int x, int y, int w, int h,
+            String title, String unit, List<Series> series, double maxValue,
+            int cursorIndex, String coverageNote, String[] xLabels, boolean braille) {
         if (w < 8 || h < 4 || series == null || series.isEmpty()) return;
         int plotX = x + Y_AXIS_WIDTH;
         int plotY = y + 1;
         int plotW = w - Y_AXIS_WIDTH;
-        int plotH = h - 1 - X_AXIS_HEIGHT;
+        boolean showXLabels = xLabels != null && xLabels.length > 0 && h >= 6;
+        int plotH = h - 1 - X_AXIS_HEIGHT - (showXLabels ? X_LABEL_HEIGHT : 0);
         if (plotW < 2 || plotH < 1) return;
-        StringBuilder heading = new StringBuilder(title == null ? "" : title);
-        for (Series value : series) {
-            heading.append("   ").append(value.dashed() ? "○ " : "● ").append(value.label());
-        }
-        Theme.put(g, x, y, w, heading.toString(), Theme.INK, true);
+        Theme.put(g, x, y, w, title == null ? "" : title, Theme.INK, true);
         if (coverageNote != null) {
-            int noteX = Math.max(x + heading.length() + 1, x + w - coverageNote.length());
+            int noteX = Math.max(x + (title == null ? 0 : title.length()) + 1,
+                    x + w - coverageNote.length());
             Theme.put(g, noteX, y, Math.max(0, x + w - noteX), coverageNote, Theme.INK_MUTED);
         }
         drawYAxis(g, x, plotY, plotH, maxValue, unit);
@@ -126,11 +150,10 @@ public final class LineChart {
         }
         int column = cursorColumn(series.get(0).samples(), cursorIndex, plotW, braille);
         if (column >= 0) {
-            drawCrosshair(g, plotX + column, plotY, plotH);
+            drawCrosshair(g, plotX + column, plotY, plotH,
+                    cursorValue(series.get(0).samples(), cursorIndex), maxValue);
         }
-        int xAxisY = plotY + plotH;
-        g.setForegroundColor(Theme.BASELINE);
-        for (int col = plotX; col < plotX + plotW; col++) g.putString(col, xAxisY, "─");
+        drawXAxis(g, plotX, plotY + plotH, plotW, showXLabels ? xLabels : null);
     }
 
     // -------------------------------------------------------------------------
@@ -196,7 +219,8 @@ public final class LineChart {
         if (cursorIndex >= 0) {
             int column = cursorColumn(samples, cursorIndex, w, braille);
             if (column >= 0) {
-                drawCrosshair(g, x + column, y, h);
+                drawCrosshair(g, x + column, y, h,
+                        cursorValue(samples, cursorIndex), maxValue);
             }
         }
     }
@@ -301,9 +325,59 @@ public final class LineChart {
         return index >= 0 && index < samples.length && samples[index] > 0;
     }
 
-    private static void drawCrosshair(TextGraphics g, int x, int y, int h) {
+    /** Draws the crosshair: dotted column plus a dot on the sample's value row. */
+    private static void drawCrosshair(TextGraphics g, int x, int y, int h,
+            double value, double maxValue) {
         g.setForegroundColor(Theme.ACCENT);
-        for (int row = y; row < y + h; row++) g.putString(x, row, "│");
+        for (int row = y; row < y + h; row++) g.putString(x, row, "┆");
+        if (!Double.isNaN(value) && maxValue > 0 && h > 0) {
+            double ratio = Math.max(0, Math.min(1.0, value / maxValue));
+            int row = y + h - 1 - (int) Math.round(ratio * (h - 1));
+            g.putString(x, row, "●");
+        }
+    }
+
+    private static double cursorValue(double[] samples, int cursor) {
+        return samples == null || cursor < 0 || cursor >= samples.length
+                ? Double.NaN : samples[cursor];
+    }
+
+    /**
+     * Draws the x-axis baseline and, when {@code labels} is not null, evenly
+     * spaced time labels below it.  Labels that would overlap are skipped.
+     */
+    private static void drawXAxis(TextGraphics g, int x, int y, int w, String[] labels) {
+        g.setForegroundColor(Theme.BASELINE);
+        for (int col = x; col < x + w; col++) g.putString(col, y, "─");
+        g.putString(x, y, "└");
+        if (labels == null || labels.length == 0 || w < 2) return;
+        int lastEnd = x - 2;
+        for (int index = 0; index < labels.length; index++) {
+            String label = labels[index];
+            int anchor = x + Math.round((float) index * (w - 1)
+                    / Math.max(1, labels.length - 1));
+            int labelX = labelPosition(anchor, label.length(), index, labels.length, x, w);
+            if (labelX <= lastEnd + 1) continue;
+            Theme.put(g, labelX, y + 1, x + w - labelX, label, Theme.INK_MUTED);
+            g.setForegroundColor(Theme.BASELINE);
+            g.putString(anchor, y, "┴");
+            lastEnd = labelX + label.length() - 1;
+        }
+    }
+
+    /** Aligns the first label left, the last right, and the middle ones centred. */
+    private static int labelPosition(int anchor, int length, int index, int count,
+            int left, int width) {
+        int position;
+        if (index == 0) {
+            position = anchor;
+        } else if (index == count - 1) {
+            position = anchor - length + 1;
+        } else {
+            position = anchor - length / 2;
+        }
+        int right = left + width - length;
+        return Math.max(left, Math.min(right, position));
     }
 
     private static void drawBlockColumn(

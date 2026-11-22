@@ -95,6 +95,7 @@
                     <exports>
                       oshi;
                       oshi.hardware;
+                      oshi.software.os;
                       oshi.util;
                     </exports>
                     <requires>*;</requires>
