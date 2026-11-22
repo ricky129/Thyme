@@ -49,6 +49,10 @@ public final class PageRegistry implements AutoCloseable {
         return entries.size();
     }
 
+    public List<Entry> entries() {
+        return entries;
+    }
+
     public boolean isRoot() {
         return activeIndex == 0;
     }

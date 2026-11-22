@@ -95,6 +95,18 @@ class WidgetSmokeTest {
         }
     }
 
+    @Test
+    void dockHitTestMatchesRenderedPositions() {
+        String[] pages = {"Home", "Containers"};
+        assertEquals(0, Dock.hitTest(1, 34, 118, pages, 1, 34));
+        assertEquals(0, Dock.hitTest(1, 34, 118, pages, 6, 34));
+        assertEquals(-1, Dock.hitTest(1, 34, 118, pages, 7, 34));
+        assertEquals(1, Dock.hitTest(1, 34, 118, pages, 9, 34));
+        assertEquals(1, Dock.hitTest(1, 34, 118, pages, 20, 34));
+        assertEquals(-1, Dock.hitTest(1, 34, 118, pages, 21, 34));
+        assertEquals(-1, Dock.hitTest(1, 34, 118, pages, 2, 33));
+    }
+
     // ── LineChart ────────────────────────────────────────────────────────────
 
     @Test

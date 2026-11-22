@@ -4,14 +4,22 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.googlecode.lanterna.TerminalPosition;
+import com.googlecode.lanterna.TerminalSize;
 import com.googlecode.lanterna.input.KeyStroke;
 import com.googlecode.lanterna.input.KeyType;
+import com.googlecode.lanterna.input.MouseAction;
+import com.googlecode.lanterna.input.MouseActionType;
+import com.googlecode.lanterna.screen.Screen;
+import com.googlecode.lanterna.screen.TerminalScreen;
+import com.googlecode.lanterna.terminal.virtual.DefaultVirtualTerminal;
 import com.ricky.thyme.exec.CommandRunner;
 import com.ricky.thyme.feature.disk.DiskSnapshot;
 import com.ricky.thyme.feature.gpu.GpuReading;
 import com.ricky.thyme.feature.gpu.GpuSnapshot;
 import com.ricky.thyme.feature.services.ServiceProvider;
 import com.ricky.thyme.feature.telemetry.EventLogBuffer;
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -19,15 +27,33 @@ import org.junit.jupiter.api.Test;
 
 class DashboardPageTest {
     @Test
-    void directionalKeysMoveAcrossKpiCardsWithoutChangingPage() {
+    void directionalKeysMoveAcrossCollageInTwoDimensionsWithoutChangingPage() {
         DashboardPage page = new DashboardPage(null, null, null, null, null, null);
 
         page.handleKey(new KeyStroke(KeyType.ArrowRight));
+        assertEquals(1, page.selectedCard());
         page.handleKey(new KeyStroke(KeyType.ArrowDown));
-        assertEquals(2, page.selectedCard());
-
-        page.handleKey(new KeyStroke(KeyType.ArrowLeft));
+        assertEquals(3, page.selectedCard());
+        page.handleKey(new KeyStroke(KeyType.ArrowDown));
+        assertEquals(4, page.selectedCard());
         page.handleKey(new KeyStroke(KeyType.ArrowUp));
+        assertEquals(3, page.selectedCard());
+        page.handleKey(new KeyStroke(KeyType.ArrowLeft));
+        assertEquals(2, page.selectedCard());
+        page.handleKey(new KeyStroke(KeyType.ArrowUp));
+        assertEquals(0, page.selectedCard());
+
+        page.handleKey(new KeyStroke('j', false, false));
+        assertEquals(2, page.selectedCard());
+        page.handleKey(new KeyStroke('j', false, false));
+        assertEquals(4, page.selectedCard());
+        page.handleKey(new KeyStroke('k', false, false));
+        assertEquals(2, page.selectedCard());
+        page.handleKey(new KeyStroke('l', false, false));
+        assertEquals(3, page.selectedCard());
+        page.handleKey(new KeyStroke('h', false, false));
+        assertEquals(2, page.selectedCard());
+        page.handleKey(new KeyStroke('k', false, false));
         assertEquals(0, page.selectedCard());
     }
 
@@ -88,38 +114,48 @@ class DashboardPageTest {
     }
 
     @Test
-    void eachFilesystemCardOpensItsOwnDrillIn() {
+    void diskDrillInOpensOnPrimaryAndCyclesAllMountedFilesystems() {
         DashboardPage page = new DashboardPage(null, null, null, null, null, null);
-        page.updateSnapshot(null, null, null, diskWithFilesystems(), null, Map.of());
+        page.updateSnapshot(null, null, null, new DiskSnapshot(List.of(), List.of(
+                filesystem("/home"), filesystem("/"), filesystem("/media/usb"))), null, Map.of());
 
-        for (int index = 0; index < 5; index++) {
-            page.handleKey(new KeyStroke(KeyType.ArrowRight));
-        }
-        assertEquals(5, page.selectedCard());
+        page.handleKey(new KeyStroke(KeyType.ArrowDown));
+        page.handleKey(new KeyStroke(KeyType.ArrowDown));
+        assertEquals(4, page.selectedCard());
 
         page.handleKey(new KeyStroke(KeyType.Enter));
-        assertEquals(true, page.showingDetails());
+        assertTrue(page.showingDetails());
+        assertEquals(1, page.selectedFilesystem());
 
-        // ↑/↓ switch read/write inside the filesystem drill-in.
-        assertEquals(false, page.filesystemWriteSelected());
+        // Tab toggles read/write inside the disk drill-in.
+        assertFalse(page.filesystemWriteSelected());
+        page.handleKey(new KeyStroke(KeyType.Tab));
+        assertTrue(page.filesystemWriteSelected());
+        page.handleKey(new KeyStroke(KeyType.Tab));
+        assertFalse(page.filesystemWriteSelected());
+
+        // ↑/↓ switch between mounted filesystems.
         page.handleKey(new KeyStroke(KeyType.ArrowDown));
-        assertEquals(true, page.filesystemWriteSelected());
+        assertEquals(2, page.selectedFilesystem());
         page.handleKey(new KeyStroke(KeyType.ArrowUp));
-        assertEquals(false, page.filesystemWriteSelected());
+        assertEquals(1, page.selectedFilesystem());
+        page.handleKey(new KeyStroke(KeyType.ArrowUp));
+        assertEquals(0, page.selectedFilesystem());
 
         // ←/→ move to the previous/next drill-in.
-        page.handleKey(new KeyStroke(KeyType.ArrowRight));
-        assertEquals(6, page.selectedCard());
         page.handleKey(new KeyStroke(KeyType.ArrowLeft));
-        assertEquals(5, page.selectedCard());
+        assertEquals(3, page.selectedCard());
+        page.handleKey(new KeyStroke(KeyType.ArrowRight));
+        assertEquals(4, page.selectedCard());
+        assertEquals(1, page.selectedFilesystem());
 
         page.handleKey(new KeyStroke(KeyType.Escape));
-        assertEquals(false, page.showingDetails());
-        assertEquals(5, page.selectedCard());
+        assertFalse(page.showingDetails());
+        assertEquals(4, page.selectedCard());
     }
 
     @Test
-    void clampsCardSelectionToTheFilesystemCardCount() {
+    void clampsCardSelectionToFiveCollageTilesEvenWithMultipleFilesystems() {
         DashboardPage page = new DashboardPage(null, null, null, null, null, null);
         page.updateSnapshot(null, null, null, diskWithFilesystems(), null, Map.of());
 
@@ -127,7 +163,48 @@ class DashboardPageTest {
             page.handleKey(new KeyStroke(KeyType.ArrowRight));
         }
 
-        assertEquals(OverviewCard.SYSTEM_CARD_COUNT + 2, page.selectedCard());
+        assertEquals(OverviewCard.SYSTEM_CARD_COUNT, page.selectedCard());
+    }
+
+    @Test
+    void mouseClickOpensTileDrillInAndClickOutsideOrOnBorderCloses() throws IOException {
+        DashboardPage page = new DashboardPage(null, null, null, null, null, null);
+        page.updateSnapshot(null, null, null, diskWithFilesystems(), null, Map.of());
+        TerminalSize size = new TerminalSize(120, 35);
+        DefaultVirtualTerminal terminal = new DefaultVirtualTerminal(size);
+        try (Screen screen = new TerminalScreen(terminal)) {
+            screen.startScreen();
+            page.render(screen.newTextGraphics(), size);
+        }
+
+        for (DashboardOverviewRenderer.TileRect tile : DashboardOverviewRenderer.computeTiles(size)) {
+            page.handleKey(new MouseAction(MouseActionType.CLICK_DOWN, 1,
+                    new TerminalPosition(tile.x() + 2, tile.y() + 2)));
+            assertTrue(page.showingDetails());
+            assertEquals(tile.cardIndex(), page.selectedCard());
+
+            DashboardOverviewRenderer.OverlayRect overlay =
+                    DashboardOverviewRenderer.computeOverlayRect(size);
+            page.handleKey(new MouseAction(MouseActionType.CLICK_DOWN, 1,
+                    new TerminalPosition(overlay.x() + 2, overlay.y())));
+            assertFalse(page.showingDetails());
+        }
+
+        // Clicking a tile, then clicking outside the overlay closes it.
+        DashboardOverviewRenderer.TileRect first = DashboardOverviewRenderer.computeTiles(size).get(0);
+        page.handleKey(new MouseAction(MouseActionType.CLICK_DOWN, 1,
+                new TerminalPosition(first.x() + 2, first.y() + 2)));
+        assertTrue(page.showingDetails());
+        page.handleKey(new MouseAction(MouseActionType.CLICK_DOWN, 1, new TerminalPosition(0, 0)));
+        assertFalse(page.showingDetails());
+
+        // Clicking in the Failed events sidebar, right-click, or release does not open a drill-in.
+        page.handleKey(new MouseAction(MouseActionType.CLICK_DOWN, 1, new TerminalPosition(90, 10)));
+        page.handleKey(new MouseAction(MouseActionType.CLICK_DOWN, 3,
+                new TerminalPosition(first.x() + 2, first.y() + 2)));
+        page.handleKey(new MouseAction(MouseActionType.CLICK_RELEASE, 1,
+                new TerminalPosition(first.x() + 2, first.y() + 2)));
+        assertFalse(page.showingDetails());
     }
 
     @Test

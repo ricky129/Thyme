@@ -1,6 +1,7 @@
 package com.ricky.thyme.ui.widgets;
 
 import com.googlecode.lanterna.TerminalSize;
+import com.googlecode.lanterna.TextColor;
 import com.googlecode.lanterna.graphics.TextGraphics;
 import com.ricky.thyme.ui.Theme;
 
@@ -37,12 +38,23 @@ public final class Panel {
      * @param title optional title placed in the top border (may be {@code null})
      */
     public static void draw(TextGraphics g, int x, int y, int w, int h, String title) {
-        Theme.drawPanel(g, x, y, w, h, Theme.HAIRLINE);
+        draw(g, x, y, w, h, title, Theme.HAIRLINE);
+    }
+
+    /**
+     * Draws the panel border with an explicit border colour.
+     */
+    public static void draw(
+            TextGraphics g, int x, int y, int w, int h, String title, TextColor borderColor) {
+        TextColor effectiveBorder = borderColor != null ? borderColor : Theme.HAIRLINE;
+        Theme.drawPanel(g, x, y, w, h, effectiveBorder);
         if (title != null && !title.isEmpty() && w > 4) {
             // Embed "─ Title ─" into the top border row
             String label = " " + title + " ";
             String clipped = Theme.clipToWidth(label, w - 4);
-            Theme.put(g, x + 2, y, clipped.length(), clipped, Theme.INK_SECONDARY, true);
+            TextColor titleColor = Theme.ACCENT.equals(effectiveBorder)
+                    ? Theme.ACCENT : Theme.INK_SECONDARY;
+            Theme.put(g, x + 2, y, clipped.length(), clipped, titleColor, true);
         }
     }
 

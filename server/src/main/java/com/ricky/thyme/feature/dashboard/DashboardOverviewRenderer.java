@@ -16,7 +16,6 @@ import com.ricky.thyme.ui.widgets.EventLog;
 import com.ricky.thyme.ui.widgets.LineChart;
 import com.ricky.thyme.ui.widgets.Panel;
 import com.ricky.thyme.ui.widgets.Sparkline;
-import com.ricky.thyme.ui.widgets.StatCard;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -84,6 +83,78 @@ public final class DashboardOverviewRenderer {
                 temperatureHistory, gpuHistory, diskIoHistory, eventLog, error, selectedCard, details);
     }
 
+    /** Bounds of one collage tile in terminal coordinates. */
+    record TileRect(int cardIndex, int x, int y, int width, int height) {
+        boolean contains(int col, int row) {
+            return col >= x && col < x + width && row >= y && row < y + height;
+        }
+    }
+
+    /** Bounds of the centered/full-width drill-in overlay. */
+    record OverlayRect(int x, int y, int width, int height) {
+        boolean contains(int col, int row) {
+            return col >= x && col < x + width && row >= y && row < y + height;
+        }
+    }
+
+    static List<TileRect> computeTiles(TerminalSize size) {
+        if (size == null || size.getColumns() < 48 || size.getRows() < 15) {
+            return List.of();
+        }
+        int width = size.getColumns();
+        int height = size.getRows();
+        int contentY = 2;
+        int footerY = height - 1;
+        int contentHeight = footerY - contentY;
+        boolean showEvents = width >= 120;
+        int eventsWidth = showEvents ? Math.max(28, Math.min(48, width / 3)) : 0;
+        int collageWidth = showEvents ? width - eventsWidth - 1 : width;
+        int colGap = 1;
+        int leftWidth = (collageWidth - colGap) / 2;
+        int rightX = leftWidth + colGap;
+        int rightWidth = collageWidth - rightX;
+        int rowGap = contentHeight >= 26 ? 1 : 0;
+        int usableHeight = contentHeight - rowGap * 2;
+        int row0Height = usableHeight / 3;
+        int row1Height = (usableHeight - row0Height) / 2;
+        int row2Height = usableHeight - row0Height - row1Height;
+        int row0Y = contentY;
+        int row1Y = row0Y + row0Height + rowGap;
+        int row2Y = row1Y + row1Height + rowGap;
+        return List.of(
+                new TileRect(0, 0, row0Y, leftWidth, row0Height),
+                new TileRect(1, rightX, row0Y, rightWidth, row0Height),
+                new TileRect(2, 0, row1Y, leftWidth, row1Height),
+                new TileRect(3, rightX, row1Y, rightWidth, row1Height),
+                new TileRect(4, 0, row2Y, collageWidth, row2Height));
+    }
+
+    static int hitTestTile(TerminalSize size, int col, int row) {
+        for (TileRect tile : computeTiles(size)) {
+            if (tile.contains(col, row)) {
+                return tile.cardIndex();
+            }
+        }
+        return -1;
+    }
+
+    static OverlayRect computeOverlayRect(TerminalSize size) {
+        if (size == null || size.getColumns() < 48 || size.getRows() < 15) {
+            return null;
+        }
+        return computeOverlayRect(size.getColumns(), size.getRows() - 1);
+    }
+
+    private static OverlayRect computeOverlayRect(int width, int height) {
+        boolean fullWidth = width < 100;
+        int overlayWidth = fullWidth ? width
+                : Math.max(44, Math.min(width - 4, (int) Math.round(width * 0.85)));
+        int overlayHeight = Math.max(11, Math.min(height - 1, (int) Math.round(height * 0.90)));
+        int x = fullWidth ? 0 : (width - overlayWidth) / 2;
+        int y = Math.max(2, (height - overlayHeight) / 2 + 1);
+        return new OverlayRect(x, y, overlayWidth, overlayHeight);
+    }
+
     /**
      * Draws the overview/detail with an explicit swap history.
      */
@@ -106,19 +177,15 @@ public final class DashboardOverviewRenderer {
         drawHeader(graphics, width, snapshot);
         int footerY = height - 1;
         drawFooter(graphics, width, footerY, false, "");
-        if (details) {
-            drawOverview(graphics, size, snapshot, cpuHistory, memoryHistory,
-                    temperatureHistory, gpuHistory, diskIoHistory, eventLog, error,
-                    selectedCard, List.of(), "");
-            drawDetail(graphics, width, footerY, snapshot, cpuHistory, memoryHistory,
-                    swapHistory, temperatureHistory, gpuHistory, diskIoHistory, selectedCard,
-                    TimeSeriesBuffer.Range.FIFTEEN_MINUTES, -1, false, true, List.of(), 0,
-                    new int[0], List.of(), false);
-            return;
-        }
         drawOverview(graphics, size, snapshot, cpuHistory, memoryHistory,
                 temperatureHistory, gpuHistory, diskIoHistory, eventLog, error,
                 selectedCard, List.of(), "");
+        if (details) {
+            drawDetail(graphics, width, footerY, snapshot, cpuHistory, memoryHistory,
+                    swapHistory, temperatureHistory, gpuHistory, diskIoHistory, selectedCard,
+                    TimeSeriesBuffer.Range.FIFTEEN_MINUTES, -1, false, true, List.of(), 0,
+                    new int[0], List.of(), false, -1);
+        }
     }
 
     private static void drawOverview(TextGraphics graphics, TerminalSize size, DashboardSnapshot snapshot,
@@ -135,25 +202,18 @@ public final class DashboardOverviewRenderer {
         eventLog = eventLog == null ? new EventLogBuffer() : eventLog;
         int width = size.getColumns();
         int height = size.getRows();
-        int footerY = height - 1;
-        int contentY = 2;
-        int contentHeight = footerY - contentY;
-        if (width < 80) {
-            drawCompact(graphics, width, contentY, contentHeight, snapshot, cpuHistory, error);
-            return;
+        int contentHeight = height - 3;
+        List<OverviewCard> cards = OverviewCard.cards(snapshot);
+        int clampedSelected = Math.max(0, Math.min(selectedCard, cards.size() - 1));
+        for (TileRect tile : computeTiles(size)) {
+            OverviewCard card = cards.get(tile.cardIndex());
+            drawCollageTile(graphics, tile, card, snapshot, cpuHistory, memoryHistory,
+                    temperatureHistory, gpuHistory, diskIoHistory, filesystems, error,
+                    tile.cardIndex() == clampedSelected);
         }
-        int cardsHeight = cardsHeight(width, OverviewCard.cards(snapshot).size());
-        drawCards(graphics, width, contentY, snapshot, cpuHistory, memoryHistory,
-                temperatureHistory, gpuHistory, diskIoHistory, filesystems, selectedCard);
-        int bodyY = contentY + cardsHeight + 1;
-        int bodyHeight = Math.max(4, footerY - bodyY);
         if (width >= 120) {
-            int eventsWidth = Math.max(28, width / 3);
-            drawCharts(graphics, 0, bodyY, width - eventsWidth - 1, bodyHeight,
-                    cpuHistory, memoryHistory, error);
-            drawEvents(graphics, width - eventsWidth, bodyY, eventsWidth, bodyHeight, eventLog, eventFilter);
-        } else {
-            drawCharts(graphics, 0, bodyY, width, bodyHeight, cpuHistory, memoryHistory, error);
+            int eventsWidth = Math.max(28, Math.min(48, width / 3));
+            drawEvents(graphics, width - eventsWidth, 2, eventsWidth, contentHeight, eventLog, eventFilter);
         }
     }
 
@@ -216,12 +276,25 @@ public final class DashboardOverviewRenderer {
             boolean perCore, boolean explainer, List<TimeSeriesBuffer> coreHistories,
             int selectedCore, int[] coreCursors, List<FilesystemSeries> filesystems,
             boolean filesystemWrite, boolean filteringEvents, String eventFilter) {
-        cpuHistory = safeHistory(cpuHistory);
-        memoryHistory = safeHistory(memoryHistory);
-        swapHistory = safeHistory(swapHistory);
-        temperatureHistory = safeHistory(temperatureHistory);
-        gpuHistory = safeHistory(gpuHistory);
-        diskIoHistory = safeHistory(diskIoHistory);
+        draw(graphics, size, snapshot, cpuHistory, memoryHistory, swapHistory,
+                temperatureHistory, gpuHistory, diskIoHistory, eventLog, error,
+                selectedCard, details, range, cursor, perCore, explainer,
+                coreHistories, selectedCore, coreCursors, filesystems,
+                filesystemWrite, filteringEvents, eventFilter, -1);
+    }
+
+    /**
+     * Draws the overview and detail overlay with an explicit selected filesystem index.
+     */
+    public static void draw(TextGraphics graphics, TerminalSize size, DashboardSnapshot snapshot,
+            TimeSeriesBuffer cpuHistory, TimeSeriesBuffer memoryHistory, TimeSeriesBuffer swapHistory,
+            TimeSeriesBuffer temperatureHistory, TimeSeriesBuffer gpuHistory,
+            TimeSeriesBuffer diskIoHistory, EventLogBuffer eventLog, String error,
+            int selectedCard, boolean details, TimeSeriesBuffer.Range range, int cursor,
+            boolean perCore, boolean explainer, List<TimeSeriesBuffer> coreHistories,
+            int selectedCore, int[] coreCursors, List<FilesystemSeries> filesystems,
+            boolean filesystemWrite, boolean filteringEvents, String eventFilter,
+            int selectedFilesystem) {
         filesystems = filesystems == null ? List.of() : filesystems;
         eventLog = eventLog == null ? new EventLogBuffer() : eventLog;
         int width = size.getColumns();
@@ -243,7 +316,7 @@ public final class DashboardOverviewRenderer {
             drawDetail(graphics, width, height - 1, snapshot, cpuHistory, memoryHistory,
                     swapHistory, temperatureHistory, gpuHistory, diskIoHistory, selectedCard,
                     range, cursor, perCore, explainer, coreHistories, selectedCore, coreCursors,
-                    filesystems, filesystemWrite);
+                    filesystems, filesystemWrite, selectedFilesystem);
         }
     }
 
@@ -258,22 +331,20 @@ public final class DashboardOverviewRenderer {
             TimeSeriesBuffer diskIoHistory, int selectedCard,
             TimeSeriesBuffer.Range range, int cursor, boolean perCore, boolean explainer,
             List<TimeSeriesBuffer> coreHistories, int selectedCore, int[] coreCursors,
-            List<FilesystemSeries> filesystems, boolean filesystemWrite) {
+            List<FilesystemSeries> filesystems, boolean filesystemWrite, int selectedFilesystem) {
         OverviewCard card = cardAt(snapshot, selectedCard);
         if (card.filesystem()) {
             drawFilesystemDetail(graphics, width, height, filesystems, card,
-                    range, cursor, explainer, filesystemWrite);
+                    range, cursor, explainer, filesystemWrite, selectedFilesystem);
             return;
         }
         String label = card.detailLabel();
-        // Compact tier (< 100 cols): overlay spans full width so the overview
-        // does not bleed through at the sides and the footer dock is not clipped.
+        OverlayRect rect = computeOverlayRect(width, height);
         boolean fullWidth = width < 100;
-        int overlayWidth = fullWidth ? width
-                : Math.max(44, Math.min(width - 4, (int) Math.round(width * 0.85)));
-        int overlayHeight = Math.max(11, Math.min(height - 1, (int) Math.round(height * 0.90)));
-        int x = fullWidth ? 0 : (width - overlayWidth) / 2;
-        int y = Math.max(2, (height - overlayHeight) / 2 + 1);
+        int overlayWidth = rect.width();
+        int overlayHeight = rect.height();
+        int x = rect.x();
+        int y = rect.y();
         graphics.setBackgroundColor(Theme.SURFACE);
         // Full-width overlays clear the whole area below the header to avoid
         // overview residue (panel borders) showing outside the overlay rect.
@@ -328,7 +399,9 @@ public final class DashboardOverviewRenderer {
         double[] samples = history == null ? new double[0] : history.samples(range);
         int chartY = y + 4;
         int chartHeight = Math.max(4, overlayHeight - (explainer ? 13 : 10));
-        double[] swapSamples = selectedCard == 1 ? swapHistory.samples(range) : new double[0];
+        double[] swapSamples = selectedCard == 1
+                ? (swapHistory == null ? new double[0] : swapHistory.samples(range))
+                : new double[0];
         double max = selectedCard == 1
                 ? Math.max(axisMaximum(1, samples, overlayWidth - 2),
                         axisMaximum(1, swapSamples, overlayWidth - 2))
@@ -390,35 +463,41 @@ public final class DashboardOverviewRenderer {
     }
 
     /**
-     * Draws the drill-in for one filesystem card. Each filesystem has its own detail overlay; {@code write} selects the write series, otherwise the read series is shown.
+     * Draws the Disk I/O drill-in overlay; when multiple filesystems exist, {@code selectedFilesystem} chooses the active mount and {@code write} toggles Read/Write.
      */
     private static void drawFilesystemDetail(TextGraphics graphics, int width, int height,
             List<FilesystemSeries> filesystems, OverviewCard card,
-            TimeSeriesBuffer.Range range, int cursor, boolean explainer, boolean write) {
-        // Compact tier (< 100 cols): overlay spans full width (R10 / spec §4).
+            TimeSeriesBuffer.Range range, int cursor, boolean explainer,
+            boolean write, int selectedFilesystem) {
+        OverlayRect rect = computeOverlayRect(width, height);
         boolean fullWidth = width < 100;
-        int overlayWidth = fullWidth ? width
-                : Math.max(44, Math.min(width - 4, (int) Math.round(width * 0.85)));
-        int overlayHeight = Math.max(11, Math.min(height - 1, (int) Math.round(height * 0.90)));
-        int x = fullWidth ? 0 : (width - overlayWidth) / 2;
-        int y = Math.max(2, (height - overlayHeight) / 2 + 1);
+        int overlayWidth = rect.width();
+        int overlayHeight = rect.height();
+        int x = rect.x();
+        int y = rect.y();
         graphics.setBackgroundColor(Theme.SURFACE);
         // Full-width overlays clear the whole area below the header to avoid
         // overview residue (panel borders) showing outside the overlay rect.
         int fillHeight = fullWidth ? height - y : overlayHeight;
         graphics.fillRectangle(new TerminalPosition(x, y), new TerminalSize(overlayWidth, fillHeight), ' ');
-        Panel.draw(graphics, x, y, overlayWidth, overlayHeight,
-                "Disk I/O  ·  " + card.detailLabel() + "  ·  Esc close");
         int innerX = x + 2;
         int innerW = overlayWidth - 4;
-        FilesystemSeries filesystem = findFilesystem(filesystems, card.mountPoint());
-        if (filesystem == null) {
+        if (filesystems == null || filesystems.isEmpty()) {
+            Panel.draw(graphics, x, y, overlayWidth, overlayHeight,
+                    "Disk I/O  ·  " + card.detailLabel() + "  ·  Esc close");
             Theme.put(graphics, innerX, y + 2, innerW,
                     "Filesystem " + card.detailLabel() + " is no longer available", Theme.INK_MUTED);
             Theme.put(graphics, innerX, y + overlayHeight - 1, innerW,
                     "Esc close", Theme.INK_MUTED);
             return;
         }
+        int fsIndex = resolveFilesystemIndex(filesystems, card.mountPoint(), selectedFilesystem);
+        FilesystemSeries filesystem = filesystems.get(fsIndex);
+        boolean multiFs = filesystems.size() > 1;
+        String title = multiFs
+                ? "Disk I/O  ·  " + filesystem.mountPoint() + " (" + (fsIndex + 1) + "/" + filesystems.size() + ")  ·  Esc close"
+                : "Disk I/O  ·  " + filesystem.mountPoint() + "  ·  Esc close";
+        Panel.draw(graphics, x, y, overlayWidth, overlayHeight, title);
         Theme.put(graphics, innerX, y + 2, innerW,
                 "Read " + mibRate(mib(filesystem.readBytesPerSecond()))
                 + "   Write " + mibRate(mib(filesystem.writeBytesPerSecond()))
@@ -426,11 +505,13 @@ public final class DashboardOverviewRenderer {
         TimeSeriesBuffer history = write ? filesystem.writeHistory() : filesystem.readHistory();
         String coverage = history.coverageNote(range);
         boolean compact = overlayHeight < 20;
-        Theme.put(graphics, innerX, y + 3, innerW,
-                rangeTabs(range)
+        String baseControls = rangeTabs(range)
                 + (compact && coverage != null ? "  " + coverage : "")
-                + "   I/O: " + (write ? "Read [Write]" : "[Read] Write") + " (↑↓)",
-                Theme.INK_SECONDARY);
+                + "   I/O: " + (write ? "Read [Write]" : "[Read] Write") + " (Tab)";
+        String controls = multiFs
+                ? appendFilesystemSelector(baseControls, filesystems, fsIndex, innerW)
+                : baseControls;
+        Theme.put(graphics, innerX, y + 3, innerW, controls, Theme.INK_SECONDARY);
         int chartY = y + 4;
         int chartHeight = compact
                 ? Math.max(3, overlayHeight - 5)
@@ -465,10 +546,48 @@ public final class DashboardOverviewRenderer {
                     filesystemSummary(filesystem), Theme.INK_SECONDARY);
         }
         Theme.put(graphics, innerX, y + overlayHeight - 1, innerW,
-                footerHint(innerW,
-                        "←/→ drill-in   ↑↓ read/write   h/l cursor   [ ] range   e explain   Esc close",
-                        "←/→ drill  ↑↓ I/O  h/l cur  Esc"),
+                multiFs
+                        ? footerHint(innerW,
+                                "←/→ drill-in   ↑↓ disk   Tab read/write   h/l cursor   [ ] range   e explain   Esc close",
+                                "←/→ drill  ↑↓ disk  Tab I/O  Esc")
+                        : footerHint(innerW,
+                                "←/→ drill-in   Tab read/write   h/l cursor   [ ] range   e explain   Esc close",
+                                "←/→ drill  Tab I/O  h/l cur  Esc"),
                 Theme.INK_MUTED);
+    }
+
+    private static int resolveFilesystemIndex(List<FilesystemSeries> filesystems,
+            String mountPoint, int selectedFilesystem) {
+        if (selectedFilesystem >= 0 && selectedFilesystem < filesystems.size()) {
+            return selectedFilesystem;
+        }
+        if (mountPoint != null) {
+            for (int index = 0; index < filesystems.size(); index++) {
+                if (filesystems.get(index).mountPoint().equals(mountPoint)) {
+                    return index;
+                }
+            }
+        }
+        return 0;
+    }
+
+    private static String appendFilesystemSelector(String baseControls,
+            List<FilesystemSeries> filesystems, int activeIndex, int innerW) {
+        int budget = innerW - baseControls.length() - 3;
+        if (budget < 10) {
+            return baseControls;
+        }
+        StringBuilder full = new StringBuilder("Disk:");
+        for (int index = 0; index < filesystems.size(); index++) {
+            String mount = filesystems.get(index).mountPoint();
+            full.append(' ').append(index == activeIndex ? "[" + mount + "]" : mount);
+        }
+        full.append(" (↑↓)");
+        if (full.length() <= budget) {
+            return baseControls + "   " + full;
+        }
+        String compact = "Disk " + (activeIndex + 1) + "/" + filesystems.size() + " (↑↓)";
+        return compact.length() <= budget ? baseControls + "   " + compact : baseControls;
     }
 
     private static String activeText(Double utilizationPercent) {
@@ -526,16 +645,6 @@ public final class DashboardOverviewRenderer {
                 + (Double.isNaN(writeValue) ? 0 : writeValue);
     }
 
-    private static double[] normalize(double[] samples, double max) {
-        double safeMax = max > 0 ? max : 1;
-        double[] normalized = new double[samples.length];
-        for (int index = 0; index < samples.length; index++) {
-            normalized[index] = Double.isNaN(samples[index])
-                    ? Double.NaN : Math.min(100, samples[index] / safeMax * 100);
-        }
-        return normalized;
-    }
-
     private static String filesystemSummary(FilesystemSeries filesystem) {
         StringBuilder text = new StringBuilder();
         text.append(filesystem.type())
@@ -564,11 +673,6 @@ public final class DashboardOverviewRenderer {
         return mebibytesPerSecond >= 100
                 ? String.format("%.0fM/s", mebibytesPerSecond)
                 : String.format("%.1fM/s", mebibytesPerSecond);
-    }
-
-    private static String mibShort(Double bytesPerSecond) {
-        return bytesPerSecond == null
-                ? "n/a" : String.format("%.1f", bytesPerSecond / (1024.0 * 1024));
     }
 
     private static Double mib(Double bytesPerSecond) {
@@ -839,9 +943,11 @@ public final class DashboardOverviewRenderer {
         if (filteringEvents) {
             hints = "Filter events: " + (eventFilter == null ? "" : eventFilter) + "_   (Enter apply · Esc cancel)";
         } else if (eventFilter != null && !eventFilter.isEmpty()) {
-            hints = "Events: " + eventFilter + " (/ edit · Esc clear)   ↑↓ select  Enter detail";
+            hints = "Events: " + eventFilter + " (/ edit · Esc clear)   ←↑↓→ select  Click/Enter detail";
         } else {
-            hints = "↑↓ select  Enter detail  / filter events  ? help  q quit";
+            hints = footerHint(Math.max(0, width - 26),
+                    "←↑↓→ select  Click/Enter detail  / filter events  ? help  q quit",
+                    "←↑↓→ select  Enter detail  ? help  q quit");
         }
         int hintsX = Math.max(1, width - hints.length() - 1);
         if (hintsX > 25) {
@@ -850,142 +956,191 @@ public final class DashboardOverviewRenderer {
         }
     }
 
-    private static void drawCompact(TextGraphics graphics, int width, int y, int height,
-            DashboardSnapshot snapshot, TimeSeriesBuffer cpuHistory, String error) {
-        String[] values = compactValues(snapshot);
-        Theme.put(graphics, 1, y, width - 2, String.join("  ", values), Theme.INK_SECONDARY);
-        int chartY = y + 2;
-        int chartHeight = Math.max(4, height - 2);
-        Panel.draw(graphics, 0, chartY, width, chartHeight, "CPU / RAM • 15M");
-        if (error != null) {
-            Theme.put(graphics, 2, chartY + 2, width - 4, error, Theme.CRITICAL);
-        } else {
-            double[] samples = cpuHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
-            LineChart.draw(graphics, 1, chartY + 1, width - 2, chartHeight - 2,
-                    "CPU / RAM", "%", samples, axisMaximum(0, samples, width - 2),
-                    Theme.CPU_SERIES, -1,
-                    cpuHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES),
-                    timeLabels(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), Theme.BRAILLE);
-        }
+    private record TileSpec(
+            String label,
+            String valueText,
+            TextColor valueColor,
+            String unit,
+            TextColor seriesColor,
+            double[] samples,
+            double maxValue,
+            String tileError,
+            String emptyMessage) {
     }
 
-    /**
-     * Height of one KPI card row.
-     */
-    private static final int CARD_HEIGHT = 5;
-
-    /**
-     * Vertical distance between two KPI card rows, including the gap.
-     */
-    private static final int CARD_STRIDE = 6;
-
-    private static int cardColumns(int width, int cardCount) {
-        int maximum = width >= 160 ? 7 : width >= 120 ? 5 : width >= 80 ? 4 : 3;
-        return Math.max(1, Math.min(cardCount, maximum));
-    }
-
-    private static int cardsHeight(int width, int cardCount) {
-        int columns = cardColumns(width, cardCount);
-        int rows = Math.max(1, (cardCount + columns - 1) / columns);
-        return rows * CARD_STRIDE - 1;
-    }
-
-    private static void drawCards(TextGraphics graphics, int width, int y,
-            DashboardSnapshot snapshot, TimeSeriesBuffer cpuHistory, TimeSeriesBuffer memoryHistory,
-            TimeSeriesBuffer temperatureHistory, TimeSeriesBuffer gpuHistory,
-            TimeSeriesBuffer diskIoHistory, List<FilesystemSeries> filesystems, int selectedCard) {
-        List<OverviewCard> cards = OverviewCard.cards(snapshot);
-        int columns = cardColumns(width, cards.size());
-        int gap = 1;
-        int cardWidth = (width - (columns - 1) * gap) / columns;
-        for (int index = 0; index < cards.size(); index++) {
-            int row = index / columns;
-            int column = index % columns;
-            int x = column * (cardWidth + gap);
-            int cardY = y + row * CARD_STRIDE;
-            drawCard(graphics, cards.get(index), x, cardY, cardWidth, snapshot,
-                    cpuHistory, memoryHistory, temperatureHistory, gpuHistory, diskIoHistory,
-                    filesystems, index == selectedCard);
-        }
-    }
-
-    private static void drawCard(TextGraphics graphics, OverviewCard card, int x, int y, int width,
+    private static void drawCollageTile(TextGraphics graphics, TileRect tile, OverviewCard card,
             DashboardSnapshot snapshot, TimeSeriesBuffer cpuHistory, TimeSeriesBuffer memoryHistory,
             TimeSeriesBuffer temperatureHistory, TimeSeriesBuffer gpuHistory,
             TimeSeriesBuffer diskIoHistory, List<FilesystemSeries> filesystems,
-            boolean selected) {
-        TimeSeriesBuffer.Range fifteenMinutes = TimeSeriesBuffer.Range.FIFTEEN_MINUTES;
-        String label = card.label();
-        String value;
-        TextColor valueColor;
-        double[] history;
-        String caption;
-        TextColor sparkColor;
-        switch (card.kind()) {
+            String error, boolean selected) {
+        int x = tile.x();
+        int y = tile.y();
+        int width = tile.width();
+        int height = tile.height();
+        graphics.setBackgroundColor(Theme.PAGE);
+        Panel.draw(graphics, x, y, width, height, null, selected ? Theme.ACCENT : Theme.HAIRLINE);
+        int ix = Panel.interiorX(x);
+        int iy = Panel.interiorY(y);
+        int iw = Panel.interiorW(width);
+        int ih = Panel.interiorH(height);
+        TileSpec spec = buildTileSpec(card, snapshot, cpuHistory, memoryHistory,
+                temperatureHistory, gpuHistory, diskIoHistory, filesystems, error, iw, ih);
+        drawTileTitle(graphics, x, y, width, spec.label(), spec.valueText(), spec.valueColor(), selected);
+        if (iw < 2 || ih < 1) {
+            return;
+        }
+        if (spec.tileError() != null) {
+            Theme.put(graphics, ix, iy, iw, spec.tileError(), Theme.CRITICAL);
+            return;
+        }
+        if (!hasFiniteSample(spec.samples())) {
+            Theme.put(graphics, ix, iy + ih / 2, iw, spec.emptyMessage(), Theme.INK_MUTED);
+            return;
+        }
+        LineChart.drawCompact(graphics, ix, iy, iw, ih, spec.unit(), spec.samples(),
+                spec.maxValue(), spec.seriesColor(),
+                timeLabels(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), Theme.BRAILLE);
+    }
+
+    private static TileSpec buildTileSpec(OverviewCard card, DashboardSnapshot snapshot,
+            TimeSeriesBuffer cpuHistory, TimeSeriesBuffer memoryHistory,
+            TimeSeriesBuffer temperatureHistory, TimeSeriesBuffer gpuHistory,
+            TimeSeriesBuffer diskIoHistory, List<FilesystemSeries> filesystems,
+            String error, int interiorWidth, int interiorHeight) {
+        TimeSeriesBuffer.Range range = TimeSeriesBuffer.Range.FIFTEEN_MINUTES;
+        int capacity = LineChart.compactSampleCapacity(interiorWidth, interiorHeight, Theme.BRAILLE);
+        String waiting = interiorWidth >= 20 ? "waiting for samples" : "waiting";
+        return switch (card.kind()) {
             case CPU -> {
                 CpuSnapshot cpu = snapshot == null ? null : snapshot.cpu();
-                value = percent(cpu == null ? null : cpu.totalUsagePercent());
-                valueColor = Theme.utilizationColor(cpu == null ? null : cpu.totalUsagePercent());
-                double[] samples = cpuHistory.samples(fifteenMinutes);
-                history = normalize(samples, adaptiveMaximumOver(samples, width, 10, 100));
-                caption = "current";
-                sparkColor = Theme.CPU_SERIES;
+                Double usage = cpu == null ? null : cpu.totalUsagePercent();
+                double[] samples = cpuHistory.samples(range);
+                yield new TileSpec("CPU", percent(usage), Theme.utilizationColor(usage),
+                        "%", Theme.CPU_SERIES, samples,
+                        adaptiveMaximumOver(samples, capacity, 10, 100),
+                        tileError(snapshot, error, "CPU", cpu == null, true), waiting);
             }
             case RAM -> {
-                Double used = snapshot == null || snapshot.memory() == null ? null
-                        : ratio(snapshot.memory().usedBytes(), snapshot.memory().totalBytes());
-                value = percent(used);
-                valueColor = Theme.utilizationColor(used);
-                double[] samples = memoryHistory.samples(fifteenMinutes);
-                history = normalize(samples, adaptiveMaximumOver(samples, width, 10, 100));
-                caption = "current";
-                sparkColor = Theme.MEMORY_SERIES;
+                var memory = snapshot == null ? null : snapshot.memory();
+                Double used = memory == null ? null : ratio(memory.usedBytes(), memory.totalBytes());
+                double[] samples = memoryHistory.samples(range);
+                yield new TileSpec("RAM", percent(used), Theme.utilizationColor(used),
+                        "%", Theme.MEMORY_SERIES, samples,
+                        adaptiveMaximumOver(samples, capacity, 10, 100),
+                        tileError(snapshot, error, "RAM", memory == null, false), waiting);
             }
             case TEMPERATURE -> {
                 CpuSnapshot cpu = snapshot == null ? null : snapshot.cpu();
-                Double temperature = cpu == null ? null : cpu.temperatureCelsius();
-                value = temperature(temperature);
-                valueColor = Theme.temperatureColor(temperature);
-                double[] samples = temperatureHistory.samples(fifteenMinutes);
-                history = normalize(samples, adaptiveMaximumOver(samples, width, 10, 0));
-                caption = "current";
-                sparkColor = Theme.INK_SECONDARY;
+                Double celsius = cpu == null ? null : cpu.temperatureCelsius();
+                double[] samples = temperatureHistory.samples(range);
+                String empty = cpu != null && celsius == null
+                        ? (interiorWidth >= 20 ? "sensor unavailable" : "no sensor")
+                        : waiting;
+                yield new TileSpec("Temp", temperature(celsius), Theme.temperatureColor(celsius),
+                        "°C", Theme.TEMP_SERIES, samples,
+                        adaptiveMaximumOver(samples, capacity, 10, 0),
+                        tileError(snapshot, error, "CPU", cpu == null, false), empty);
             }
             case GPU -> {
-                GpuSnapshot gpu = firstGpu(snapshot == null ? null : snapshot.gpu());
-                Double utilization = gpu == null ? null : gpu.utilizationPercent();
-                value = percent(utilization);
-                valueColor = Theme.utilizationColor(utilization);
-                double[] samples = gpuHistory.samples(fifteenMinutes);
-                history = normalize(samples, adaptiveMaximumOver(samples, width, 10, 100));
-                caption = "latest sample";
-                sparkColor = Theme.INK_SECONDARY;
+                GpuReading reading = snapshot == null ? null : snapshot.gpu();
+                GpuSnapshot gpu = firstGpu(reading);
+                Double util = gpu == null ? null : gpu.utilizationPercent();
+                double[] samples = gpuHistory.samples(range);
+                String empty = reading != null && reading.devices().isEmpty()
+                        ? (interiorWidth >= 16 ? "no GPU detected" : "no GPU")
+                        : waiting;
+                yield new TileSpec("GPU", percent(util), Theme.utilizationColor(util),
+                        "%", Theme.GPU_SERIES, samples,
+                        adaptiveMaximumOver(samples, capacity, 10, 100),
+                        tileError(snapshot, error, "GPU", reading == null || reading.devices().isEmpty(), false),
+                        empty);
             }
             case FILESYSTEM -> {
-                FilesystemSeries filesystem = findFilesystem(filesystems, card.mountPoint());
-                Double combined = filesystem == null ? null : combinedMib(filesystem);
-                value = combined == null ? "n/a" : mibRate(combined);
-                valueColor = Theme.INK;
-                double[] samples = filesystem == null
-                        ? new double[0] : combinedSamples(filesystem, fifteenMinutes);
-                history = normalize(samples, adaptiveMaximumOver(samples, width, 0.1, 0));
-                caption = filesystem == null ? "n/a"
-                        : "R " + mibShort(filesystem.readBytesPerSecond())
-                        + " W " + mibShort(filesystem.writeBytesPerSecond()) + " M/s";
-                sparkColor = Theme.IO_SERIES;
+                FilesystemSeries fs = findFilesystem(filesystems, card.mountPoint());
+                Double combined = fs == null ? null : combinedMib(fs);
+                double[] samples = fs == null ? new double[0] : combinedSamples(fs, range);
+                String empty = snapshot != null && snapshot.disk() != null ? "no I/O data" : waiting;
+                yield new TileSpec("Disk " + card.mountPoint(),
+                        combined == null ? "n/a" : mibRate(combined),
+                        combined == null ? Theme.INK_MUTED : Theme.INK,
+                        "M/s", Theme.IO_SERIES, samples,
+                        adaptiveMaximumOver(samples, capacity, 0.1, 0),
+                        tileError(snapshot, error, "Disks",
+                                fs == null && (snapshot == null || snapshot.disk() == null), false),
+                        empty);
             }
-            default -> {
+            case DISK_TOTAL -> {
                 Double total = totalFilesystemIo(snapshot == null ? null : snapshot.disk());
-                value = total == null ? "n/a" : rate(total);
-                valueColor = Theme.INK;
-                double[] samples = diskIoHistory.samples(fifteenMinutes);
-                history = normalize(samples, adaptiveMaximumOver(samples, width, 0.1, 0));
-                caption = "latest sample";
-                sparkColor = Theme.IO_SERIES;
+                double[] samples = diskIoHistory.samples(range);
+                String empty = snapshot != null && snapshot.disk() != null ? "no I/O data" : waiting;
+                yield new TileSpec("Disk I/O",
+                        total == null ? "n/a" : rate(total),
+                        total == null ? Theme.INK_MUTED : Theme.INK,
+                        "M/s", Theme.IO_SERIES, samples,
+                        adaptiveMaximumOver(samples, capacity, 0.1, 0),
+                        tileError(snapshot, error, "Disks",
+                                snapshot == null || snapshot.disk() == null, false),
+                        empty);
+            }
+        };
+    }
+
+    private static String tileError(DashboardSnapshot snapshot, String legacyError,
+            String providerKey, boolean missingData, boolean acceptLegacyError) {
+        if (snapshot != null && !snapshot.errors().isEmpty()) {
+            String err = snapshot.errors().get(providerKey);
+            return err != null && missingData ? err : null;
+        }
+        return acceptLegacyError ? legacyError : null;
+    }
+
+    private static void drawTileTitle(TextGraphics graphics, int x, int y, int width,
+            String label, String valueText, TextColor valueColor, boolean selected) {
+        int budget = width - 4;
+        if (budget <= 0) {
+            return;
+        }
+        String prefix = selected ? " ▸ " : " ";
+        String sep = " · ";
+        String arrow = " ›";
+        String trailing = " ";
+        int fixed = prefix.length() + sep.length() + valueText.length() + arrow.length() + trailing.length();
+        if (fixed + 3 > budget) {
+            String compact = Theme.clipToWidth(prefix + label + sep + valueText + arrow + trailing, budget);
+            Theme.put(graphics, x + 2, y, budget, compact,
+                    selected ? Theme.ACCENT : Theme.INK_SECONDARY, true);
+            return;
+        }
+        String fittedLabel = fixed + label.length() <= budget
+                ? label
+                : Theme.clipToWidth(label, budget - fixed);
+        int col = x + 2;
+        Theme.put(graphics, col, y, prefix.length(), prefix,
+                selected ? Theme.ACCENT : Theme.INK_SECONDARY, true);
+        col += prefix.length();
+        Theme.put(graphics, col, y, fittedLabel.length(), fittedLabel,
+                selected ? Theme.ACCENT : Theme.INK_SECONDARY, true);
+        col += fittedLabel.length();
+        Theme.put(graphics, col, y, sep.length(), sep, Theme.INK_MUTED);
+        col += sep.length();
+        Theme.put(graphics, col, y, valueText.length(), valueText, valueColor, true);
+        col += valueText.length();
+        Theme.put(graphics, col, y, arrow.length(), arrow,
+                selected ? Theme.ACCENT : Theme.INK_MUTED, selected);
+        col += arrow.length();
+        Theme.put(graphics, col, y, trailing.length(), trailing, Theme.INK_MUTED);
+    }
+
+    private static boolean hasFiniteSample(double[] samples) {
+        if (samples == null) {
+            return false;
+        }
+        for (double sample : samples) {
+            if (Double.isFinite(sample)) {
+                return true;
             }
         }
-        StatCard.draw(graphics, x, y, width, CARD_HEIGHT, label, value, valueColor, history,
-                caption, true, selected, sparkColor);
+        return false;
     }
 
     private static FilesystemSeries findFilesystem(List<FilesystemSeries> filesystems, String mountPoint) {
@@ -995,48 +1150,6 @@ public final class DashboardOverviewRenderer {
             }
         }
         return null;
-    }
-
-    private static void drawCharts(TextGraphics graphics, int x, int y, int width, int height,
-            TimeSeriesBuffer cpuHistory, TimeSeriesBuffer memoryHistory, String error) {
-        if (width < 20 || height < 3)
-            return;
-        // When height is too tight to split (< 8 rows), show a single CPU panel.
-        // The spec §C (80x24) keeps both panels; we split whenever there is room.
-        boolean split = height >= 8;
-        int firstHeight = split ? Math.max(4, height / 2) : height;
-        Panel.draw(graphics, x, y, width, firstHeight, split ? "CPU • 15M" : "CPU / RAM • 15M");
-        if (error != null) {
-            Theme.put(graphics, x + 2, y + 2, width - 4, error, Theme.CRITICAL);
-        } else {
-            boolean legend = firstHeight >= 9;
-            int chartHeight = firstHeight - 2 - (legend ? 1 : 0);
-            double[] samples = cpuHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
-            String coverage = cpuHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
-            LineChart.draw(graphics, x + 1, y + 1, width - 2, chartHeight, "CPU", "%",
-                    samples, axisMaximum(0, samples, width - 2),
-                    Theme.CPU_SERIES, -1, legend ? null : coverage,
-                    timeLabels(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), Theme.BRAILLE);
-            if (legend) {
-                drawLegend(graphics, x + 2, y + 1 + chartHeight, width - 4, "● total", coverage);
-            }
-        }
-        int secondY = y + firstHeight + 1;
-        int secondHeight = height - firstHeight - 1;
-        if (split && secondHeight >= 3) {
-            Panel.draw(graphics, x, secondY, width, secondHeight, "RAM • 15M");
-            boolean legend = secondHeight >= 9;
-            int chartHeight = secondHeight - 2 - (legend ? 1 : 0);
-            double[] samples = memoryHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
-            String coverage = memoryHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
-            LineChart.draw(graphics, x + 1, secondY + 1, width - 2, chartHeight, "RAM", "%",
-                    samples, axisMaximum(1, samples, width - 2),
-                    Theme.MEMORY_SERIES, -1, legend ? null : coverage,
-                    timeLabels(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), Theme.BRAILLE);
-            if (legend) {
-                drawLegend(graphics, x + 2, secondY + 1 + chartHeight, width - 4, "● used", coverage);
-            }
-        }
     }
 
     private static void drawEvents(TextGraphics graphics, int x, int y, int width, int height,
@@ -1072,29 +1185,15 @@ public final class DashboardOverviewRenderer {
                 Theme.CPU_SERIES;
             case 1 ->
                 Theme.MEMORY_SERIES;
+            case 2 ->
+                Theme.TEMP_SERIES;
+            case 3 ->
+                Theme.GPU_SERIES;
             case 4 ->
                 Theme.IO_SERIES;
             default ->
                 Theme.PRIMARY;
         };
-    }
-
-    private static String[] compactValues(DashboardSnapshot snapshot) {
-        String[] values = cardValues(snapshot);
-        return new String[]{"CPU " + values[0], "RAM " + values[1],
-            "Temp " + values[2], "GPU " + values[3], "I/O " + values[4]};
-    }
-
-    private static String[] cardValues(DashboardSnapshot snapshot) {
-        CpuSnapshot cpu = snapshot == null ? null : snapshot.cpu();
-        GpuSnapshot gpu = firstGpu(snapshot == null ? null : snapshot.gpu());
-        Double diskIo = totalFilesystemIo(snapshot == null ? null : snapshot.disk());
-        return new String[]{percent(cpu == null ? null : cpu.totalUsagePercent()),
-            percent(snapshot == null || snapshot.memory() == null ? null
-            : ratio(snapshot.memory().usedBytes(), snapshot.memory().totalBytes())),
-            temperature(cpu == null ? null : cpu.temperatureCelsius()),
-            percent(gpu == null ? null : gpu.utilizationPercent()),
-            rate(diskIo)};
     }
 
     private static TextColor healthColor(DashboardSnapshot snapshot) {

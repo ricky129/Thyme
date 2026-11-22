@@ -133,6 +133,41 @@ class LineChartTest {
         }
     }
 
+    @Test
+    void drawCompactSupportsAxisAndAxislessCollageModes() throws Exception {
+        var terminal = new DefaultVirtualTerminal[1];
+        try (TerminalScreen screen = screen(40, 10, terminal)) {
+            LineChart.drawCompact(screen.newTextGraphics(), 0, 0, 38, 8, "%",
+                    ramp(40), 100, Theme.CPU_SERIES,
+                    new String[]{"-15m", "-10m", "-5m", "now"}, true);
+            screen.refresh();
+            StringBuilder row7 = new StringBuilder();
+            for (int col = 0; col < 38; col++) {
+                row7.append(terminal[0].getCharacter(col, 7).getCharacter());
+            }
+            assertTrue(row7.toString().contains("-15m"));
+            assertTrue(row7.toString().contains("now"));
+        }
+
+        var miniTerminal = new DefaultVirtualTerminal[1];
+        try (TerminalScreen miniScreen = screen(21, 2, miniTerminal)) {
+            LineChart.drawCompact(miniScreen.newTextGraphics(), 0, 0, 21, 2, "%",
+                    ramp(20), 100, Theme.CPU_SERIES, null, true);
+            miniScreen.refresh();
+            int braille = 0;
+            for (int row = 0; row < 2; row++) {
+                for (int col = 0; col < 21; col++) {
+                    char ch = miniTerminal[0].getCharacter(col, row).getCharacter();
+                    if (ch >= 0x2800 && ch <= 0x28FF) {
+                        braille++;
+                    }
+                }
+            }
+            assertTrue(braille > 0, "axisless compact chart should draw braille dots");
+            assertEquals(42, LineChart.compactSampleCapacity(21, 2, true));
+        }
+    }
+
     private static TerminalScreen screen(int width, int height, DefaultVirtualTerminal[] terminal)
             throws Exception {
         terminal[0] = new DefaultVirtualTerminal(new TerminalSize(width, height));

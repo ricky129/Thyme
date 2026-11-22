@@ -63,4 +63,16 @@ class PanelTest {
             assertDoesNotThrow(() -> Panel.draw(g, 0, 0, 1, 1, "X")); // too small, no-op
         }
     }
+
+    @Test
+    void drawPanelSupportsCustomBorderColor() throws Exception {
+        var term = terminal(20, 4);
+        try (var screen = new TerminalScreen(term)) {
+            screen.startScreen();
+            Panel.draw(screen.newTextGraphics(), 0, 0, 20, 4, "CPU", Theme.ACCENT);
+            screen.refresh();
+            assertEquals(Theme.ACCENT, term.getCharacter(0, 0).getForegroundColor());
+            assertEquals(Theme.ACCENT, term.getCharacter(3, 0).getForegroundColor());
+        }
+    }
 }

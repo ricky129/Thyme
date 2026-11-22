@@ -91,9 +91,11 @@ public final class Theme {
     public static final TextColor SECONDARY   = color(0x4a, 0xde, 0x80, TextColor.ANSI.GREEN_BRIGHT);
     public static final TextColor CPU_SERIES  = color(0x7d, 0xd3, 0xfc, TextColor.ANSI.CYAN_BRIGHT);
     public static final TextColor MEMORY_SERIES = PRIMARY;
+    public static final TextColor GPU_SERIES  = color(0xc0, 0x84, 0xfc, TextColor.ANSI.MAGENTA_BRIGHT);
     public static final TextColor IO_SERIES   = SECONDARY;
     public static final TextColor SWAP_SERIES = color(0x93, 0xc5, 0xfd, TextColor.ANSI.BLUE);
     public static final TextColor WARM        = color(0xf0, 0x90, 0x48, TextColor.ANSI.YELLOW);
+    public static final TextColor TEMP_SERIES = WARM;
     public static final TextColor ACCENT      = color(0xe0, 0xa4, 0x22, TextColor.ANSI.YELLOW_BRIGHT);
     public static final TextColor GOOD        = color(0x4d, 0xb4, 0x50, TextColor.ANSI.GREEN);
     public static final TextColor CRITICAL    = color(0xf4, 0x3f, 0x5e, TextColor.ANSI.RED_BRIGHT);

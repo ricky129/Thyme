@@ -21,20 +21,29 @@ class OverviewCardTest {
     }
 
     @Test
-    void appendsOneCardPerFilesystemInProviderOrder() {
-        DashboardSnapshot snapshot = new DashboardSnapshot(Instant.EPOCH, null, null, null,
+    void selectsSinglePrimaryFilesystemWithoutHardcodingRoot() {
+        DashboardSnapshot rootSecond = new DashboardSnapshot(Instant.EPOCH, null, null, null,
                 new DiskSnapshot(List.of(), List.of(
-                        filesystem("/"), filesystem("/home"), filesystem("/media/usb"))),
+                        filesystem("/home", 500), filesystem("/", 100), filesystem("/media/usb", 32))),
                 List.of(), Map.of());
 
-        List<OverviewCard> cards = OverviewCard.cards(snapshot);
+        List<OverviewCard> rootCards = OverviewCard.cards(rootSecond);
+        assertEquals(OverviewCard.SYSTEM_CARD_COUNT + 1, rootCards.size());
+        assertEquals("/", rootCards.get(OverviewCard.SYSTEM_CARD_COUNT).mountPoint());
+        assertTrue(rootCards.get(OverviewCard.SYSTEM_CARD_COUNT).filesystem());
+        assertEquals(OverviewCard.Kind.GPU, rootCards.get(3).kind());
 
-        assertEquals(OverviewCard.SYSTEM_CARD_COUNT + 3, cards.size());
-        assertEquals("/", cards.get(OverviewCard.SYSTEM_CARD_COUNT).mountPoint());
-        assertEquals("/home", cards.get(OverviewCard.SYSTEM_CARD_COUNT + 1).mountPoint());
-        assertEquals("/media/usb", cards.get(OverviewCard.SYSTEM_CARD_COUNT + 2).mountPoint());
-        assertTrue(cards.get(OverviewCard.SYSTEM_CARD_COUNT).filesystem());
-        assertEquals(OverviewCard.Kind.GPU, cards.get(3).kind());
+        DashboardSnapshot withoutRoot = new DashboardSnapshot(Instant.EPOCH, null, null, null,
+                new DiskSnapshot(List.of(), List.of(
+                        filesystem("/mnt/backup/a", 800),
+                        filesystem("/var", 50),
+                        filesystem("/data", 500))),
+                List.of(), Map.of());
+
+        List<OverviewCard> withoutRootCards = OverviewCard.cards(withoutRoot);
+        assertEquals(OverviewCard.SYSTEM_CARD_COUNT + 1, withoutRootCards.size());
+        assertEquals("/data", withoutRootCards.get(OverviewCard.SYSTEM_CARD_COUNT).mountPoint());
+        assertEquals(2, OverviewCard.primaryFilesystemIndex(withoutRoot.disk().filesystems()));
     }
 
     @Test
@@ -43,8 +52,9 @@ class OverviewCardTest {
                 () -> new OverviewCard(OverviewCard.Kind.FILESYSTEM, " "));
     }
 
-    private static DiskSnapshot.Filesystem filesystem(String mountPoint) {
+    private static DiskSnapshot.Filesystem filesystem(String mountPoint, long totalBytes) {
         return new DiskSnapshot.Filesystem("/dev/sda1", mountPoint, "ext4",
-                100, 60, 40, List.of("sda1"), 0.0, 0.0, 0.0, 0.0, 0.0);
+                totalBytes, totalBytes / 2, totalBytes / 2, List.of("sda1"),
+                0.0, 0.0, 0.0, 0.0, 0.0);
     }
 }

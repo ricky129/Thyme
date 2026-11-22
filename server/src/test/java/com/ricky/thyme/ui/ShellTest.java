@@ -1,6 +1,10 @@
 package com.ricky.thyme.ui;
 
+import com.googlecode.lanterna.TerminalPosition;
 import com.googlecode.lanterna.TerminalSize;
+import com.googlecode.lanterna.input.KeyStroke;
+import com.googlecode.lanterna.input.MouseAction;
+import com.googlecode.lanterna.input.MouseActionType;
 import com.googlecode.lanterna.screen.Screen;
 import com.googlecode.lanterna.screen.Screen.RefreshType;
 import com.googlecode.lanterna.screen.TerminalScreen;
@@ -98,5 +102,56 @@ class ShellTest {
         // '?' closes help
         shell.testHandleKey(new com.googlecode.lanterna.input.KeyStroke('?', false, false), Runnable::run);
         assertFalse(shell.isHelpActive());
+
+        // Left mouse click closes help too
+        shell.testHandleKey(new com.googlecode.lanterna.input.KeyStroke('?', false, false), Runnable::run);
+        assertTrue(shell.isHelpActive());
+        shell.testHandleKey(new MouseAction(MouseActionType.CLICK_DOWN, 1, new TerminalPosition(5, 5)),
+                Runnable::run, new TerminalSize(80, 24));
+        assertFalse(shell.isHelpActive());
+    }
+
+    @Test
+    void clickingDockEntrySwitchesActivePage() {
+        Page home = dummyPage("Home");
+        Page containers = dummyPage("Containers");
+        PageRegistry registry = new PageRegistry(java.util.List.of(
+                new PageRegistry.Entry("overview", home),
+                new PageRegistry.Entry("containers", containers)));
+        Shell shell = new Shell(registry);
+        TerminalSize size = new TerminalSize(120, 35);
+
+        assertEquals("overview", registry.activeId());
+        shell.testHandleKey(new MouseAction(MouseActionType.CLICK_DOWN, 1, new TerminalPosition(10, 34)),
+                Runnable::run, size);
+        assertEquals("containers", registry.activeId());
+
+        shell.testHandleKey(new MouseAction(MouseActionType.CLICK_DOWN, 1, new TerminalPosition(2, 34)),
+                Runnable::run, size);
+        assertEquals("overview", registry.activeId());
+    }
+
+    private static Page dummyPage(String title) {
+        return new Page() {
+            @Override
+            public String title() {
+                return title;
+            }
+
+            @Override
+            public void handleKey(KeyStroke key) {
+                // no-op for test
+            }
+
+            @Override
+            public void refresh() {
+                // no-op for test
+            }
+
+            @Override
+            public void render(com.googlecode.lanterna.graphics.TextGraphics graphics, TerminalSize size) {
+                // no-op for test
+            }
+        };
     }
 }

@@ -115,6 +115,53 @@ public final class LineChart {
         drawXAxis(g, plotX, plotY + plotH, plotW, showXLabels ? xLabels : null);
     }
 
+    /**
+     * Draws a compact chart without an internal title row for border-titled collage tiles.
+     * Falls back to an axisless mini-plot when height is under 4 rows or width is under 10 cols.
+     */
+    public static void drawCompact(
+            TextGraphics g,
+            int x, int y, int w, int h,
+            String unit,
+            double[] samples,
+            double maxValue,
+            TextColor color,
+            String[] xLabels,
+            boolean braille) {
+        if (w < 2 || h < 1) return;
+
+        if (h < 4 || w < 10) {
+            if (samples == null || samples.length == 0) {
+                String placeholder = w >= 20 ? "waiting for samples" : "waiting";
+                Theme.put(g, x, y + h / 2, w, placeholder, Theme.INK_MUTED);
+                return;
+            }
+            drawPlot(g, x, y, w, h, samples, maxValue, color, -1, braille);
+            return;
+        }
+
+        int plotX = x + Y_AXIS_WIDTH;
+        int plotY = y;
+        int plotW = w - Y_AXIS_WIDTH;
+        boolean showXLabels = xLabels != null && xLabels.length > 0 && h >= 7;
+        int plotH = h - X_AXIS_HEIGHT - (showXLabels ? X_LABEL_HEIGHT : 0);
+        if (plotW < 2 || plotH < 1) return;
+
+        drawYAxis(g, x, plotY, plotH, maxValue, unit);
+        drawPlot(g, plotX, plotY, plotW, plotH, samples, maxValue, color, -1, braille);
+        drawXAxis(g, plotX, plotY + plotH, plotW, showXLabels ? xLabels : null);
+    }
+
+    /**
+     * Number of samples a compact border-titled chart can display.
+     */
+    public static int compactSampleCapacity(int chartWidth, int chartHeight, boolean braille) {
+        int plotWidth = chartHeight >= 4 && chartWidth >= 10
+                ? Math.max(1, chartWidth - Y_AXIS_WIDTH)
+                : Math.max(1, chartWidth);
+        return Math.max(1, braille ? plotWidth * 2 : plotWidth);
+    }
+
     /** Draws multiple series sharing one axis and one crosshair. */
     public static void drawMulti(TextGraphics g, int x, int y, int w, int h,
             String title, String unit, List<Series> series, double maxValue,

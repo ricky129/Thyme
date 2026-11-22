@@ -54,9 +54,16 @@ class UiSnapshotTest {
         String overviewText = Files.readString(overview);
         assertTrue(overviewText.contains("myserver"), "header must show the hostname");
         assertTrue(overviewText.contains("up 12d 4h"), "header must show the uptime");
+        assertTrue(overviewText.contains("CPU") && overviewText.contains("RAM")
+                && overviewText.contains("Temp") && overviewText.contains("GPU")
+                && overviewText.contains("Disk I/O"),
+                "home collage must show all five metric panels");
+        assertTrue(overviewText.contains("Failed events"),
+                "wide home view must keep the failed events sidebar");
         assertTrue(overviewText.contains("-15m") && overviewText.contains("now"),
                 "charts must label the x axis with time");
-        assertTrue(overviewText.contains("● total"), "the chart needs a legend row");
+        assertFalse(overviewText.contains("Core 0"),
+                "home collage must show total CPU only, not per-core charts");
         String detailText = Files.readString(Path.of("target", "ui-snapshots", "detail-120x35.txt"));
         assertTrue(detailText.contains("-15m") && detailText.contains("now"));
         assertTrue(detailText.contains("● total"));
@@ -157,32 +164,35 @@ class UiSnapshotTest {
             writeSnapshot("disk-detail", size, (graphics, terminalSize) ->
                     DashboardOverviewRenderer.draw(graphics, terminalSize, snapshot, cpu, memory,
                             swap, temperature, gpu, disk, new EventLogBuffer(), null,
-                            OverviewCard.SYSTEM_CARD_COUNT + 1, true,
+                            OverviewCard.SYSTEM_CARD_COUNT, true,
                             TimeSeriesBuffer.Range.FIFTEEN_MINUTES, 898, false, true,
-                            List.<TimeSeriesBuffer>of(), 0, new int[0], filesystems, false));
+                            List.<TimeSeriesBuffer>of(), 0, new int[0], filesystems, false,
+                            false, "", 1));
         }
         writeSnapshot("disk-detail-write", new TerminalSize(120, 35), (graphics, terminalSize) ->
                 DashboardOverviewRenderer.draw(graphics, terminalSize, snapshot, cpu, memory,
                         swap, temperature, gpu, disk, new EventLogBuffer(), null,
-                        OverviewCard.SYSTEM_CARD_COUNT + 1, true,
+                        OverviewCard.SYSTEM_CARD_COUNT, true,
                         TimeSeriesBuffer.Range.FIFTEEN_MINUTES, 898, false, true,
-                        List.<TimeSeriesBuffer>of(), 0, new int[0], filesystems, true));
+                        List.<TimeSeriesBuffer>of(), 0, new int[0], filesystems, true,
+                        false, "", 1));
         String overview = Files.readString(
                 Path.of("target", "ui-snapshots", "filesystem-overview-120x35.txt"));
-        assertTrue(overview.contains("/home"));
-        assertTrue(overview.contains("/media/usb"));
+        assertTrue(overview.contains("Disk /"));
+        assertFalse(overview.contains("/home"));
+        assertFalse(overview.contains("/media/usb"));
         String detail = Files.readString(
                 Path.of("target", "ui-snapshots", "disk-detail-120x35.txt"));
         assertTrue(detail.contains("Disk I/O"));
+        assertTrue(detail.contains("(2/3)"));
         assertTrue(detail.contains("/home"));
-        assertTrue(detail.contains("I/O: [Read] Write"));
+        assertTrue(detail.contains("I/O: [Read] Write (Tab)"));
+        assertTrue(detail.contains("Disk: / [/home] /media/usb (↑↓)"));
         assertTrue(detail.contains("8M/s"),
                 "the axis must scale to the visible samples instead of a fixed range");
-        assertFalse(detail.contains("↑↓ filesystem"),
-                "each filesystem must have its own drill-in, not a shared selector");
         String writeDetail = Files.readString(
                 Path.of("target", "ui-snapshots", "disk-detail-write-120x35.txt"));
-        assertTrue(writeDetail.contains("I/O: Read [Write]"));
+        assertTrue(writeDetail.contains("I/O: Read [Write] (Tab)"));
         assertTrue(writeDetail.contains("/home · write"));
     }
 

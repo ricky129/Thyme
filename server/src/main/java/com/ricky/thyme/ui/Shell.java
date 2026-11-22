@@ -4,10 +4,14 @@ import com.googlecode.lanterna.TerminalSize;
 import com.googlecode.lanterna.graphics.TextGraphics;
 import com.googlecode.lanterna.input.KeyStroke;
 import com.googlecode.lanterna.input.KeyType;
+import com.googlecode.lanterna.input.MouseAction;
 import com.googlecode.lanterna.screen.Screen;
 import com.googlecode.lanterna.screen.TerminalScreen;
 import com.googlecode.lanterna.terminal.DefaultTerminalFactory;
+import com.googlecode.lanterna.terminal.MouseCaptureMode;
+import com.ricky.thyme.ui.widgets.Dock;
 import java.io.IOException;
+import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.LockSupport;
@@ -17,6 +21,7 @@ public final class Shell {
 
     private final PageRegistry registry;
     private final AtomicBoolean helpActive = new AtomicBoolean(false);
+    private TerminalSize lastTerminalSize;
 
     public Shell(Page page) {
         this(PageRegistry.of(page));
@@ -37,7 +42,9 @@ public final class Shell {
 
     public void run() throws IOException {
         try (var background = Executors.newVirtualThreadPerTaskExecutor();
-                Screen screen = new TerminalScreen(new DefaultTerminalFactory().createTerminal())) {
+                Screen screen = new TerminalScreen(new DefaultTerminalFactory()
+                        .setMouseCaptureMode(MouseCaptureMode.CLICK_RELEASE)
+                        .createTerminal())) {
             screen.startScreen();
             screen.setCursorPosition(null);
             registry.active().onShow(background);
@@ -53,6 +60,7 @@ public final class Shell {
 
                     long now = System.nanoTime();
                     TerminalSize terminalSize = currentTerminalSize(screen);
+                    lastTerminalSize = terminalSize;
                     boolean resized = !terminalSize.equals(lastSize);
                     if (resized) {
                         lastSize = terminalSize;
@@ -82,6 +90,13 @@ public final class Shell {
 
     private boolean handleKey(KeyStroke key, java.util.concurrent.Executor background) {
         if (helpActive.get()) {
+            if (key instanceof MouseAction mouse) {
+                if (mouse.isMouseDown() && mouse.getButton() == 1) {
+                    helpActive.set(false);
+                    registry.active().invalidate();
+                }
+                return true;
+            }
             if (key.getKeyType() == KeyType.Escape
                     || key.getKeyType() == KeyType.F1
                     || (key.getKeyType() == KeyType.Character && key.getCharacter() != null && key.getCharacter() == '?')) {
@@ -98,6 +113,29 @@ public final class Shell {
         }
 
         Page previous = registry.active();
+        if (key instanceof MouseAction mouse) {
+            if (mouse.isMouseDown() && mouse.getButton() == 1
+                    && !registry.active().capturesGlobalNavigation()
+                    && lastTerminalSize != null
+                    && mouse.getPosition() != null
+                    && mouse.getPosition().getRow() == lastTerminalSize.getRows() - 1) {
+                int clickedPage = Dock.hitTest(
+                        1,
+                        lastTerminalSize.getRows() - 1,
+                        lastTerminalSize.getColumns() - 2,
+                        dockLabels(),
+                        mouse.getPosition().getColumn(),
+                        mouse.getPosition().getRow());
+                if (clickedPage >= 0 && registry.select(clickedPage)) {
+                    switchToSelected(background, previous);
+                    return true;
+                }
+            }
+            registry.active().handleKey(key);
+            registry.active().invalidate();
+            return true;
+        }
+
         if (key.getKeyType() == KeyType.Character && key.getCharacter() != null
                 && (key.getCharacter() == 'q' || key.getCharacter() == 'Q')) {
             if (registry.isRoot()) {
@@ -118,6 +156,22 @@ public final class Shell {
         registry.active().handleKey(key);
         registry.active().invalidate();
         return true;
+    }
+
+    private String[] dockLabels() {
+        List<PageRegistry.Entry> entries = registry.entries();
+        String[] labels = new String[entries.size()];
+        for (int index = 0; index < entries.size(); index++) {
+            PageRegistry.Entry entry = entries.get(index);
+            if ("overview".equals(entry.id())) {
+                labels[index] = "Home";
+            } else if ("containers".equals(entry.id())) {
+                labels[index] = "Containers";
+            } else {
+                labels[index] = entry.page().title();
+            }
+        }
+        return labels;
     }
 
     private void returnToRoot(java.util.concurrent.Executor background, Page previous) {
@@ -171,6 +225,11 @@ public final class Shell {
     }
 
     boolean testHandleKey(KeyStroke key, java.util.concurrent.Executor background) {
+        return handleKey(key, background);
+    }
+
+    boolean testHandleKey(KeyStroke key, java.util.concurrent.Executor background, TerminalSize size) {
+        lastTerminalSize = size;
         return handleKey(key, background);
     }
 

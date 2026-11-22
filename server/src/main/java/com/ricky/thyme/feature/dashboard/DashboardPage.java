@@ -6,6 +6,7 @@ import com.googlecode.lanterna.TextColor;
 import com.googlecode.lanterna.graphics.TextGraphics;
 import com.googlecode.lanterna.input.KeyStroke;
 import com.googlecode.lanterna.input.KeyType;
+import com.googlecode.lanterna.input.MouseAction;
 import com.ricky.thyme.feature.cpu.CpuSnapshot;
 import com.ricky.thyme.feature.cpu.OshiCpuProvider;
 import com.ricky.thyme.feature.disk.DiskProvider;
@@ -83,6 +84,9 @@ public final class DashboardPage extends Page {
     private final AtomicBoolean loading = new AtomicBoolean();
     private final AtomicInteger selectedService = new AtomicInteger();
     private final AtomicInteger selectedCard = new AtomicInteger();
+    private final AtomicInteger selectedFilesystem = new AtomicInteger();
+    private final AtomicInteger lastCollageColumn = new AtomicInteger();
+    private final AtomicReference<TerminalSize> lastRenderSize = new AtomicReference<>();
     private final AtomicBoolean details = new AtomicBoolean();
     private final AtomicReference<TimeSeriesBuffer.Range> detailRange
             = new AtomicReference<>(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
@@ -178,7 +182,8 @@ public final class DashboardPage extends Page {
                         "  ←/→           Switch between KPI drill-ins",
                         "  h/l           Move inspection cursor left / right",
                         "  [ / ] or t    Change time range (15M / 1H / 6H)",
-                        "  Tab or ↑/↓    Toggle Read / Write I/O series",
+                        "  Tab           Toggle Read / Write I/O series",
+                        "  ↑/↓ or j/k    Switch filesystem (when multiple exist)",
                         "  e             Toggle metric explanation box",
                         "  Esc / Enter   Close detail overlay"
                 );
@@ -200,8 +205,8 @@ public final class DashboardPage extends Page {
             );
         }
         return List.of(
-                "  ←/→ or h/l    Select KPI card",
-                "  Enter         Open detail overlay for selected KPI",
+                "  ←↑↓→ / hjkl   Select collage panel",
+                "  Enter / Click Open detail overlay for panel",
                 "  /             Filter events in event log",
                 "  r             Refresh metrics now",
                 "  1..2 / Tab    Switch to another page"
@@ -211,7 +216,14 @@ public final class DashboardPage extends Page {
     @Override
     public void handleKey(KeyStroke key) {
         if (filteringEvents) {
+            if (key instanceof MouseAction) {
+                return;
+            }
             handleEventFilterKey(key);
+            return;
+        }
+        if (key instanceof MouseAction mouse) {
+            handleMouse(mouse);
             return;
         }
 
@@ -242,10 +254,14 @@ public final class DashboardPage extends Page {
         } else if (details.get() && card.filesystem()
                 && key.getKeyType() == KeyType.Tab) {
             filesystemWrite.set(!filesystemWrite.get());
+            resetCursor();
         } else if (details.get() && card.filesystem() && isNextCoreKey(key)) {
-            filesystemWrite.set(true);
+            int max = Math.max(0, filesystemCount() - 1);
+            selectedFilesystem.updateAndGet(value -> Math.min(value + 1, max));
+            resetCursor();
         } else if (details.get() && card.filesystem() && isPreviousCoreKey(key)) {
-            filesystemWrite.set(false);
+            selectedFilesystem.updateAndGet(value -> Math.max(0, value - 1));
+            resetCursor();
         } else if (details.get() && key.getKeyType() == KeyType.ArrowRight) {
             moveDrillIn(1);
         } else if (details.get() && key.getKeyType() == KeyType.ArrowLeft) {
@@ -263,10 +279,14 @@ public final class DashboardPage extends Page {
         } else if (details.get() && key.getKeyType() == KeyType.Character && key.getCharacter() != null
                 && Character.toLowerCase(key.getCharacter()) == 'e') {
             explainer.set(!explainer.get());
-        } else if (!details.get() && isNextCardKey(key)) {
-            selectedCard.updateAndGet(value -> Math.min(value + 1, Math.max(0, cardCount() - 1)));
-        } else if (!details.get() && isPreviousCardKey(key)) {
-            selectedCard.updateAndGet(value -> Math.max(0, value - 1));
+        } else if (!details.get() && isRightKey(key)) {
+            moveLinearCard(1);
+        } else if (!details.get() && isLeftKey(key)) {
+            moveLinearCard(-1);
+        } else if (!details.get() && isNextCoreKey(key)) {
+            moveVerticalCard(1);
+        } else if (!details.get() && isPreviousCoreKey(key)) {
+            moveVerticalCard(-1);
         } else if (key.getKeyType() == KeyType.Character && key.getCharacter() != null) {
             char ch = Character.toLowerCase(key.getCharacter());
             if (ch == 'r') {
@@ -274,6 +294,78 @@ public final class DashboardPage extends Page {
             } else if (ch == '/' && !details.get()) {
                 filteringEvents = true;
             }
+        }
+    }
+
+    private void handleMouse(MouseAction mouse) {
+        if (!mouse.isMouseDown() || mouse.getButton() != 1) {
+            return;
+        }
+        TerminalSize size = lastRenderSize.get();
+        TerminalPosition pos = mouse.getPosition();
+        if (size == null || pos == null) {
+            return;
+        }
+        if (!details.get()) {
+            int tile = DashboardOverviewRenderer.hitTestTile(size, pos.getColumn(), pos.getRow());
+            if (tile >= 0) {
+                selectedCard.set(tile);
+                rememberColumn(tile);
+                details.set(true);
+                resetDetailState();
+            }
+            return;
+        }
+        DashboardOverviewRenderer.OverlayRect overlay = DashboardOverviewRenderer.computeOverlayRect(size);
+        if (overlay == null || !overlay.contains(pos.getColumn(), pos.getRow()) || pos.getRow() == overlay.y()) {
+            details.set(false);
+        }
+    }
+
+    private void moveLinearCard(int delta) {
+        int max = Math.max(0, cardCount() - 1);
+        int next = selectedCard.updateAndGet(value -> Math.max(0, Math.min(max, value + delta)));
+        rememberColumn(next);
+    }
+
+    private void moveVerticalCard(int delta) {
+        int max = Math.max(0, cardCount() - 1);
+        selectedCard.updateAndGet(current -> {
+            if (delta > 0) {
+                if (current == 0) {
+                    lastCollageColumn.set(0);
+                    return Math.min(2, max);
+                }
+                if (current == 1) {
+                    lastCollageColumn.set(1);
+                    return Math.min(3, max);
+                }
+                if (current == 2 || current == 3) {
+                    lastCollageColumn.set(current == 3 ? 1 : 0);
+                    return Math.min(4, max);
+                }
+                return current;
+            }
+            if (current == 2) {
+                lastCollageColumn.set(0);
+                return 0;
+            }
+            if (current == 3) {
+                lastCollageColumn.set(1);
+                return 1;
+            }
+            if (current == 4) {
+                return lastCollageColumn.get() == 1 ? 3 : 2;
+            }
+            return current;
+        });
+    }
+
+    private void rememberColumn(int cardIndex) {
+        if (cardIndex == 0 || cardIndex == 2) {
+            lastCollageColumn.set(0);
+        } else if (cardIndex == 1 || cardIndex == 3) {
+            lastCollageColumn.set(1);
         }
     }
 
@@ -304,6 +396,7 @@ public final class DashboardPage extends Page {
         perCore.set(false);
         selectedCore.set(0);
         filesystemWrite.set(false);
+        selectedFilesystem.set(primaryFilesystemIndex());
         explainer.set(false);
         resetCursor();
     }
@@ -321,9 +414,11 @@ public final class DashboardPage extends Page {
             return;
         }
         selectedCard.set(next);
+        rememberColumn(next);
         perCore.set(false);
         selectedCore.set(0);
         filesystemWrite.set(false);
+        selectedFilesystem.set(primaryFilesystemIndex());
         resetCursor();
     }
 
@@ -389,12 +484,39 @@ public final class DashboardPage extends Page {
             case GPU ->
                 gpuHistory;
             case FILESYSTEM -> {
-                FilesystemHistory history = filesystemHistory(currentCard().mountPoint());
+                String mountPoint = activeDetailFilesystemMountPoint();
+                if (mountPoint == null) {
+                    yield null;
+                }
+                FilesystemHistory history = filesystemHistory(mountPoint);
                 yield filesystemWrite.get() ? history.write() : history.read();
             }
             case DISK_TOTAL ->
                 diskIoHistory;
         };
+    }
+
+    private int primaryFilesystemIndex() {
+        DashboardSnapshot current = snapshot.get();
+        if (current == null || current.disk() == null) {
+            return 0;
+        }
+        return Math.max(0, OverviewCard.primaryFilesystemIndex(current.disk().filesystems()));
+    }
+
+    private int filesystemCount() {
+        DashboardSnapshot current = snapshot.get();
+        return current == null || current.disk() == null ? 0 : current.disk().filesystems().size();
+    }
+
+    private String activeDetailFilesystemMountPoint() {
+        DashboardSnapshot current = snapshot.get();
+        if (current != null && current.disk() != null && !current.disk().filesystems().isEmpty()) {
+            List<DiskSnapshot.Filesystem> filesystems = current.disk().filesystems();
+            int index = Math.max(0, Math.min(selectedFilesystem.get(), filesystems.size() - 1));
+            return filesystems.get(index).mountPoint();
+        }
+        return currentCard().mountPoint();
     }
 
     private OverviewCard currentCard() {
@@ -655,6 +777,10 @@ public final class DashboardPage extends Page {
         return filesystemWrite.get();
     }
 
+    int selectedFilesystem() {
+        return selectedFilesystem.get();
+    }
+
     @Override
     public void close() {
         scheduler.close();
@@ -729,12 +855,14 @@ public final class DashboardPage extends Page {
 
     @Override
     public void render(TextGraphics graphics, TerminalSize size) {
+        lastRenderSize.set(size);
         DashboardOverviewRenderer.draw(graphics, size, snapshot.get(), cpuHistory, memoryHistory,
                 swapHistory, temperatureHistory, gpuHistory, diskIoHistory,
                 eventLog, pageError.get(), selectedCard.get(), details.get(), detailRange.get(),
                 detailCursor(), perCore.get(), explainer.get(), coreHistories.get(), selectedCore.get(),
                 coreCursors.get().stream().mapToInt(AtomicInteger::get).toArray(),
-                filesystemSeries(), filesystemWrite.get(), filteringEvents, eventFilterQuery);
+                filesystemSeries(), filesystemWrite.get(), filteringEvents, eventFilterQuery,
+                selectedFilesystem.get());
     }
 
     private List<FilesystemSeries> filesystemSeries() {
@@ -750,20 +878,12 @@ public final class DashboardPage extends Page {
         return List.copyOf(series);
     }
 
-    private static boolean isNextCardKey(KeyStroke key) {
-        if (key.getKeyType() == KeyType.ArrowRight || key.getKeyType() == KeyType.ArrowDown) {
-            return true;
-        }
-        return key.getKeyType() == KeyType.Character && key.getCharacter() != null
-                && Character.toLowerCase(key.getCharacter()) == 'l';
+    private static boolean isRightKey(KeyStroke key) {
+        return key.getKeyType() == KeyType.ArrowRight || isNextCursorKey(key);
     }
 
-    private static boolean isPreviousCardKey(KeyStroke key) {
-        if (key.getKeyType() == KeyType.ArrowLeft || key.getKeyType() == KeyType.ArrowUp) {
-            return true;
-        }
-        return key.getKeyType() == KeyType.Character && key.getCharacter() != null
-                && Character.toLowerCase(key.getCharacter()) == 'h';
+    private static boolean isLeftKey(KeyStroke key) {
+        return key.getKeyType() == KeyType.ArrowLeft || isPreviousCursorKey(key);
     }
 
     private static boolean isNextRangeKey(KeyStroke key) {

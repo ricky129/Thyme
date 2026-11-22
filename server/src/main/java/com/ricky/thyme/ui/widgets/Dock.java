@@ -53,4 +53,34 @@ public final class Dock {
             }
         }
     }
+
+    /**
+     * Returns the index of the dock entry at {@code (clickCol, clickRow)}, or {@code -1}
+     * if the coordinates do not fall on a rendered entry.
+     */
+    public static int hitTest(
+            int x, int y, int width,
+            String[] labels,
+            int clickCol, int clickRow) {
+        if (clickRow != y || labels == null || labels.length == 0 || width <= 0) {
+            return -1;
+        }
+        int col = x;
+        for (int i = 0; i < labels.length; i++) {
+            if (col >= x + width) {
+                break;
+            }
+            String entry = (i + 1) + " " + labels[i];
+            int remaining = x + width - col;
+            int renderedLen = Math.min(entry.length(), remaining);
+            if (clickCol >= col && clickCol < col + renderedLen) {
+                return i;
+            }
+            col += entry.length();
+            if (i < labels.length - 1 && col < x + width - 2) {
+                col += 2;
+            }
+        }
+        return -1;
+    }
 }
