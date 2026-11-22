@@ -55,6 +55,12 @@ public final class Theme {
     public static final boolean INDEXED_256;
     /** Whether colour output is suppressed (NO_COLOR env var is set). */
     public static final boolean NO_COLOR;
+    /**
+     * Whether the terminal can render braille characters.  The Linux kernel
+     * console and dumb terminals cannot; charts fall back to block glyphs
+     * there.
+     */
+    public static final boolean BRAILLE;
 
     static {
         NO_COLOR = System.getenv("NO_COLOR") != null;
@@ -66,6 +72,7 @@ public final class Theme {
                         || "24bit".equalsIgnoreCase(colorterm)))
                         || normalizedTerm.contains("direct"));
         INDEXED_256 = !NO_COLOR && !TRUECOLOR && normalizedTerm.contains("256color");
+        BRAILLE = !"dumb".equals(normalizedTerm) && !"linux".equals(normalizedTerm);
     }
 
     // -------------------------------------------------------------------------

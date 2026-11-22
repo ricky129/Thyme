@@ -78,11 +78,11 @@ public final class DashboardPage extends Page {
     private final AtomicBoolean loading = new AtomicBoolean();
     private final AtomicInteger selectedService = new AtomicInteger();
     private final AtomicInteger selectedCard = new AtomicInteger();
-    private final AtomicInteger selectedFilesystem = new AtomicInteger();
     private final AtomicBoolean details = new AtomicBoolean();
     private final AtomicReference<TimeSeriesBuffer.Range> detailRange =
             new AtomicReference<>(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
     private final AtomicInteger detailCursor = new AtomicInteger(-1);
+    private final AtomicBoolean filesystemWrite = new AtomicBoolean();
     private final AtomicBoolean perCore = new AtomicBoolean();
     private final AtomicInteger selectedCore = new AtomicInteger();
     private final AtomicReference<List<AtomicInteger>> coreCursors =
@@ -151,18 +151,13 @@ public final class DashboardPage extends Page {
     public void handleKey(KeyStroke key) {
         OverviewCard card = currentCard();
         if (key.getKeyType() == KeyType.Escape) {
-            syncCardFromFilesystem();
             details.set(false);
         } else if (key.getKeyType() == KeyType.Enter) {
             if (details.get()) {
-                syncCardFromFilesystem();
                 details.set(false);
             } else {
                 details.set(true);
                 resetDetailState();
-                if (card.filesystem()) {
-                    selectedFilesystem.set(filesystemIndexOf(card.mountPoint()));
-                }
             }
         } else if (details.get() && card.kind() == OverviewCard.Kind.CPU
                 && key.getKeyType() == KeyType.Tab) {
@@ -174,11 +169,17 @@ public final class DashboardPage extends Page {
         } else if (details.get() && card.kind() == OverviewCard.Kind.CPU && perCore.get()
                 && isPreviousCoreKey(key)) {
             selectedCore.updateAndGet(value -> Math.max(0, value - 1));
+        } else if (details.get() && card.filesystem()
+                && key.getKeyType() == KeyType.Tab) {
+            filesystemWrite.set(!filesystemWrite.get());
         } else if (details.get() && card.filesystem() && isNextCoreKey(key)) {
-            selectedFilesystem.updateAndGet(value ->
-                    Math.min(value + 1, Math.max(0, filesystemCount() - 1)));
+            filesystemWrite.set(true);
         } else if (details.get() && card.filesystem() && isPreviousCoreKey(key)) {
-            selectedFilesystem.updateAndGet(value -> Math.max(0, value - 1));
+            filesystemWrite.set(false);
+        } else if (details.get() && key.getKeyType() == KeyType.ArrowRight) {
+            moveDrillIn(1);
+        } else if (details.get() && key.getKeyType() == KeyType.ArrowLeft) {
+            moveDrillIn(-1);
         } else if (details.get() && isNextRangeKey(key)) {
             detailRange.updateAndGet(TimeSeriesBuffer.Range::next);
             resetCursor();
@@ -192,9 +193,9 @@ public final class DashboardPage extends Page {
         } else if (details.get() && key.getKeyType() == KeyType.Character && key.getCharacter() != null
                 && Character.toLowerCase(key.getCharacter()) == 'e') {
             explainer.set(!explainer.get());
-        } else if (isNextCardKey(key)) {
+        } else if (!details.get() && isNextCardKey(key)) {
             selectedCard.updateAndGet(value -> Math.min(value + 1, Math.max(0, cardCount() - 1)));
-        } else if (isPreviousCardKey(key)) {
+        } else if (!details.get() && isPreviousCardKey(key)) {
             selectedCard.updateAndGet(value -> Math.max(0, value - 1));
         } else if (key.getKeyType() == KeyType.Character && key.getCharacter() != null) {
             if (Character.toLowerCase(key.getCharacter()) == 'r') {
@@ -207,8 +208,25 @@ public final class DashboardPage extends Page {
         detailRange.set(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
         perCore.set(false);
         selectedCore.set(0);
-        selectedFilesystem.set(0);
+        filesystemWrite.set(false);
         explainer.set(true);
+        resetCursor();
+    }
+
+    /** Moves to the previous/next drill-in (KPI card) while an overlay is open. */
+    private void moveDrillIn(int delta) {
+        int count = cardCount();
+        if (count == 0) {
+            return;
+        }
+        int next = Math.max(0, Math.min(count - 1, selectedCard.get() + delta));
+        if (next == selectedCard.get()) {
+            return;
+        }
+        selectedCard.set(next);
+        perCore.set(false);
+        selectedCore.set(0);
+        filesystemWrite.set(false);
         resetCursor();
     }
 
@@ -224,9 +242,7 @@ public final class DashboardPage extends Page {
     private void moveCursor(int delta) {
         OverviewCard card = currentCard();
         boolean perCoreCard = card.kind() == OverviewCard.Kind.CPU && perCore.get();
-        TimeSeriesBuffer history = perCoreCard ? selectedCoreHistory()
-                : card.filesystem() ? selectedFilesystemHistory()
-                : historyForSelectedCard();
+        TimeSeriesBuffer history = perCoreCard ? selectedCoreHistory() : historyForSelectedCard();
         if (history == null) {
             return;
         }
@@ -269,18 +285,12 @@ public final class DashboardPage extends Page {
             case RAM -> memoryHistory;
             case TEMPERATURE -> temperatureHistory;
             case GPU -> gpuHistory;
-            case FILESYSTEM -> selectedFilesystemHistory();
+            case FILESYSTEM -> {
+                FilesystemHistory history = filesystemHistory(currentCard().mountPoint());
+                yield filesystemWrite.get() ? history.write() : history.read();
+            }
             case DISK_TOTAL -> diskIoHistory;
         };
-    }
-
-    private TimeSeriesBuffer selectedFilesystemHistory() {
-        List<DiskSnapshot.Filesystem> filesystems = filesystems();
-        if (filesystems.isEmpty()) {
-            return null;
-        }
-        String mountPoint = filesystems.get(selectedFilesystem()).mountPoint();
-        return filesystemHistory(mountPoint).read();
     }
 
     private OverviewCard currentCard() {
@@ -291,32 +301,6 @@ public final class DashboardPage extends Page {
 
     private int cardCount() {
         return OverviewCard.cards(snapshot.get()).size();
-    }
-
-    private List<DiskSnapshot.Filesystem> filesystems() {
-        DashboardSnapshot current = snapshot.get();
-        return current == null || current.disk() == null
-                ? List.of() : current.disk().filesystems();
-    }
-
-    private int filesystemCount() {
-        return filesystems().size();
-    }
-
-    private int filesystemIndexOf(String mountPoint) {
-        List<DiskSnapshot.Filesystem> filesystems = filesystems();
-        for (int index = 0; index < filesystems.size(); index++) {
-            if (filesystems.get(index).mountPoint().equals(mountPoint)) {
-                return index;
-            }
-        }
-        return 0;
-    }
-
-    private void syncCardFromFilesystem() {
-        if (details.get() && currentCard().filesystem()) {
-            selectedCard.set(OverviewCard.SYSTEM_CARD_COUNT + selectedFilesystem());
-        }
     }
 
     private static boolean isNextCoreKey(KeyStroke key) {
@@ -520,9 +504,8 @@ public final class DashboardPage extends Page {
         return selectedCore.get();
     }
 
-    int selectedFilesystem() {
-        int count = filesystemCount();
-        return count == 0 ? 0 : Math.max(0, Math.min(selectedFilesystem.get(), count - 1));
+    boolean filesystemWriteSelected() {
+        return filesystemWrite.get();
     }
 
     @Override
@@ -596,7 +579,7 @@ public final class DashboardPage extends Page {
                 eventLog, pageError.get(), selectedCard.get(), details.get(), detailRange.get(),
                 detailCursor(), perCore.get(), explainer.get(), coreHistories.get(), selectedCore.get(),
                 coreCursors.get().stream().mapToInt(AtomicInteger::get).toArray(),
-                filesystemSeries(), selectedFilesystem());
+                filesystemSeries(), filesystemWrite.get());
     }
 
     private List<FilesystemSeries> filesystemSeries() {
@@ -639,14 +622,12 @@ public final class DashboardPage extends Page {
     }
 
     private static boolean isNextCursorKey(KeyStroke key) {
-        return key.getKeyType() == KeyType.ArrowRight
-                || key.getKeyType() == KeyType.Character && key.getCharacter() != null
+        return key.getKeyType() == KeyType.Character && key.getCharacter() != null
                 && Character.toLowerCase(key.getCharacter()) == 'l';
     }
 
     private static boolean isPreviousCursorKey(KeyStroke key) {
-        return key.getKeyType() == KeyType.ArrowLeft
-                || key.getKeyType() == KeyType.Character && key.getCharacter() != null
+        return key.getKeyType() == KeyType.Character && key.getCharacter() != null
                 && Character.toLowerCase(key.getCharacter()) == 'h';
     }
 

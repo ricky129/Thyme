@@ -48,10 +48,26 @@ class DashboardPageTest {
     void cursorStaysHiddenAtNewestUntilMovingLeft() {
         DashboardPage page = new DashboardPage(null, null, null, null, null);
         page.handleKey(new KeyStroke(KeyType.Enter));
+        page.handleKey(new KeyStroke('l', false, false));
+        assertEquals(-1, page.detailCursor());
+        page.handleKey(new KeyStroke('h', false, false));
+        assertEquals(-1, page.detailCursor());
+    }
+
+    @Test
+    void arrowsMoveBetweenDrillInsWhileOpen() {
+        DashboardPage page = new DashboardPage(null, null, null, null, null);
+        page.handleKey(new KeyStroke(KeyType.Enter));
+        assertEquals(true, page.showingDetails());
+
         page.handleKey(new KeyStroke(KeyType.ArrowRight));
-        assertEquals(-1, page.detailCursor());
+        assertEquals(1, page.selectedCard());
         page.handleKey(new KeyStroke(KeyType.ArrowLeft));
-        assertEquals(-1, page.detailCursor());
+        assertEquals(0, page.selectedCard());
+
+        // Clamped at the first drill-in.
+        page.handleKey(new KeyStroke(KeyType.ArrowLeft));
+        assertEquals(0, page.selectedCard());
     }
 
     @Test
@@ -63,7 +79,7 @@ class DashboardPageTest {
     }
 
     @Test
-    void selectsFilesystemCardsAndMovesInsideTheDiskGrid() {
+    void eachFilesystemCardOpensItsOwnDrillIn() {
         DashboardPage page = new DashboardPage(null, null, null, null, null);
         page.updateSnapshot(null, null, null, diskWithFilesystems(), null, Map.of());
 
@@ -74,14 +90,23 @@ class DashboardPageTest {
 
         page.handleKey(new KeyStroke(KeyType.Enter));
         assertEquals(true, page.showingDetails());
-        assertEquals(1, page.selectedFilesystem());
 
+        // ↑/↓ switch read/write inside the filesystem drill-in.
+        assertEquals(false, page.filesystemWriteSelected());
         page.handleKey(new KeyStroke(KeyType.ArrowDown));
-        page.handleKey(new KeyStroke(KeyType.ArrowDown));
-        assertEquals(2, page.selectedFilesystem());
+        assertEquals(true, page.filesystemWriteSelected());
+        page.handleKey(new KeyStroke(KeyType.ArrowUp));
+        assertEquals(false, page.filesystemWriteSelected());
+
+        // ←/→ move to the previous/next drill-in.
+        page.handleKey(new KeyStroke(KeyType.ArrowRight));
+        assertEquals(6, page.selectedCard());
+        page.handleKey(new KeyStroke(KeyType.ArrowLeft));
+        assertEquals(5, page.selectedCard());
 
         page.handleKey(new KeyStroke(KeyType.Escape));
-        assertEquals(6, page.selectedCard());
+        assertEquals(false, page.showingDetails());
+        assertEquals(5, page.selectedCard());
     }
 
     @Test
