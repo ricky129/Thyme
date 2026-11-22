@@ -83,7 +83,8 @@ public final class Shell {
             returnToRoot(background, previous);
             return true;
         }
-        if (key.getKeyType() == KeyType.Escape && !registry.isRoot()) {
+        if (key.getKeyType() == KeyType.Escape && !registry.isRoot()
+                && !registry.active().capturesGlobalNavigation()) {
             returnToRoot(background, previous);
             return true;
         }
