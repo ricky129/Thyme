@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 class ContainerProviderTest {
+
     private static final String RUNNING_ID = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     private static final String STOPPED_ID = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
@@ -18,18 +19,22 @@ class ContainerProviderTest {
         ContainerProvider provider = new ContainerProvider((command, timeout) -> {
             calls.add(command);
             return switch (command.get(1)) {
-                case "ps" -> ok(
-                        "{\"ID\":\"" + STOPPED_ID + "\",\"Names\":\"db\",\"Image\":\"postgres\","
-                                + "\"State\":\"exited\",\"Status\":\"Exited (1) 2 hours ago\","
-                                + "\"RunningFor\":\"3 days ago\"}\n"
-                                + "{\"ID\":\"" + RUNNING_ID + "\",\"Names\":\"web\",\"Image\":\"nginx\","
-                                + "\"State\":\"running\",\"Status\":\"Up 4 hours\","
-                                + "\"RunningFor\":\"4 hours\"}\n");
-                case "stats" -> ok("{\"Container\":\"0123456789ab\",\"Name\":\"web\","
-                        + "\"CPUPerc\":\"1.25%\",\"MemUsage\":\"20MiB / 1GiB\",\"MemPerc\":\"2%\","
-                        + "\"NetIO\":\"1kB / 2kB\",\"BlockIO\":\"3kB / 4kB\",\"PIDs\":\"5\"}\n");
-                case "inspect" -> ok(RUNNING_ID + "|2|0\n" + STOPPED_ID + "|0|1\n");
-                default -> throw new AssertionError(command);
+                case "ps" ->
+                    ok(
+                    "{\"ID\":\"" + STOPPED_ID + "\",\"Names\":\"db\",\"Image\":\"postgres\","
+                    + "\"State\":\"exited\",\"Status\":\"Exited (1) 2 hours ago\","
+                    + "\"RunningFor\":\"3 days ago\"}\n"
+                    + "{\"ID\":\"" + RUNNING_ID + "\",\"Names\":\"web\",\"Image\":\"nginx\","
+                    + "\"State\":\"running\",\"Status\":\"Up 4 hours\","
+                    + "\"RunningFor\":\"4 hours\"}\n");
+                case "stats" ->
+                    ok("""
+                                   {"Container":"0123456789ab","Name":"web","CPUPerc":"1.25%","MemUsage":"20MiB / 1GiB","MemPerc":"2%","NetIO":"1kB / 2kB","BlockIO":"3kB / 4kB","PIDs":"5"}
+                                   """);
+                case "inspect" ->
+                    ok(RUNNING_ID + "|2|0\n" + STOPPED_ID + "|0|1\n");
+                default ->
+                    throw new AssertionError(command);
             };
         });
 

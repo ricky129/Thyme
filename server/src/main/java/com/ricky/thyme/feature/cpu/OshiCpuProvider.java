@@ -48,5 +48,4 @@ public final class OshiCpuProvider {
     private static Double percent(double fraction) {
         return Double.isFinite(fraction) && fraction >= 0 ? Math.min(100, fraction * 100) : null;
     }
-
 }

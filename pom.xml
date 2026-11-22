@@ -17,10 +17,10 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <junit.version>5.13.4</junit.version>
     <lanterna.version>3.1.2</lanterna.version>
-    <oshi.version>6.6.5</oshi.version>
-    <jna.version>5.15.0</jna.version>
+    <oshi.version>7.8.0</oshi.version>
+    <jna.version>5.19.1</jna.version>
     <jackson.version>2.22.3</jackson.version>
-    <slf4j.version>2.0.16</slf4j.version>
+    <slf4j.version>2.0.20</slf4j.version>
   </properties>
 
   <dependencyManagement>
@@ -37,12 +37,12 @@
       </dependency>
       <dependency>
         <groupId>net.java.dev.jna</groupId>
-        <artifactId>jna</artifactId>
+        <artifactId>jna-jpms</artifactId>
         <version>${jna.version}</version>
       </dependency>
       <dependency>
         <groupId>net.java.dev.jna</groupId>
-        <artifactId>jna-platform</artifactId>
+        <artifactId>jna-platform-jpms</artifactId>
         <version>${jna.version}</version>
       </dependency>
       <dependency>

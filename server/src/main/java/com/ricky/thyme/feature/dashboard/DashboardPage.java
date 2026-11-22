@@ -72,8 +72,8 @@ public final class DashboardPage extends Page {
     private final TimeSeriesBuffer temperatureHistory = new TimeSeriesBuffer();
     private final TimeSeriesBuffer gpuHistory = new TimeSeriesBuffer();
     private final TimeSeriesBuffer diskIoHistory = new TimeSeriesBuffer();
-    private final AtomicReference<List<TimeSeriesBuffer>> coreHistories =
-            new AtomicReference<>(List.of());
+    private final AtomicReference<List<TimeSeriesBuffer>> coreHistories
+            = new AtomicReference<>(List.of());
     private final Map<String, FilesystemHistory> filesystemHistories = new HashMap<>();
     private final MetricScheduler scheduler = new MetricScheduler();
     private final EventLogBuffer eventLog = new EventLogBuffer();
@@ -82,15 +82,15 @@ public final class DashboardPage extends Page {
     private final AtomicInteger selectedService = new AtomicInteger();
     private final AtomicInteger selectedCard = new AtomicInteger();
     private final AtomicBoolean details = new AtomicBoolean();
-    private final AtomicReference<TimeSeriesBuffer.Range> detailRange =
-            new AtomicReference<>(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
+    private final AtomicReference<TimeSeriesBuffer.Range> detailRange
+            = new AtomicReference<>(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
     private final AtomicInteger detailCursor = new AtomicInteger(-1);
     private final AtomicBoolean filesystemWrite = new AtomicBoolean();
     private final AtomicBoolean perCore = new AtomicBoolean();
     private final AtomicInteger selectedCore = new AtomicInteger();
-    private final AtomicReference<List<AtomicInteger>> coreCursors =
-            new AtomicReference<>(List.of());
-    private final AtomicBoolean explainer = new AtomicBoolean(true);
+    private final AtomicReference<List<AtomicInteger>> coreCursors
+            = new AtomicReference<>(List.of());
+    private final AtomicBoolean explainer = new AtomicBoolean(false);
     private final AtomicLong generation = new AtomicLong();
     private Executor background;
 
@@ -301,11 +301,13 @@ public final class DashboardPage extends Page {
         perCore.set(false);
         selectedCore.set(0);
         filesystemWrite.set(false);
-        explainer.set(true);
+        explainer.set(false);
         resetCursor();
     }
 
-    /** Moves to the previous/next drill-in (KPI card) while an overlay is open. */
+    /**
+     * Moves to the previous/next drill-in (KPI card) while an overlay is open.
+     */
     private void moveDrillIn(int delta) {
         int count = cardCount();
         if (count == 0) {
@@ -325,7 +327,8 @@ public final class DashboardPage extends Page {
     private void resetCursor() {
         if (perCore.get()) {
             AtomicInteger cursor = selectedCoreCursor();
-            if (cursor != null) cursor.set(-1);
+            if (cursor != null)
+                cursor.set(-1);
         } else {
             detailCursor.set(-1);
         }
@@ -343,7 +346,8 @@ public final class DashboardPage extends Page {
             return;
         }
         AtomicInteger cursorState = perCoreCard ? selectedCoreCursor() : detailCursor;
-        if (cursorState == null) return;
+        if (cursorState == null)
+            return;
         int current = cursorState.get();
         if (current < 0) {
             if (delta > 0) {
@@ -373,15 +377,20 @@ public final class DashboardPage extends Page {
 
     private TimeSeriesBuffer historyForSelectedCard() {
         return switch (currentCard().kind()) {
-            case CPU -> cpuHistory;
-            case RAM -> memoryHistory;
-            case TEMPERATURE -> temperatureHistory;
-            case GPU -> gpuHistory;
+            case CPU ->
+                cpuHistory;
+            case RAM ->
+                memoryHistory;
+            case TEMPERATURE ->
+                temperatureHistory;
+            case GPU ->
+                gpuHistory;
             case FILESYSTEM -> {
                 FilesystemHistory history = filesystemHistory(currentCard().mountPoint());
                 yield filesystemWrite.get() ? history.write() : history.read();
             }
-            case DISK_TOTAL -> diskIoHistory;
+            case DISK_TOTAL ->
+                diskIoHistory;
         };
     }
 
@@ -474,7 +483,9 @@ public final class DashboardPage extends Page {
         updateSnapshot(cpu, memory, null, disk, null, errors, readHost());
     }
 
-    /** Reads the header identity; a failure keeps the previous values instead of failing the page. */
+    /**
+     * Reads the header identity; a failure keeps the previous values instead of failing the page.
+     */
     private HostSnapshot readHost() {
         if (hostProvider == null) {
             return snapshot.get() == null ? null : snapshot.get().host();
@@ -500,7 +511,8 @@ public final class DashboardPage extends Page {
 
     private void ensureCoreHistories(int coreCount) {
         List<TimeSeriesBuffer> current = coreHistories.get();
-        if (current.size() == coreCount) return;
+        if (current.size() == coreCount)
+            return;
         List<TimeSeriesBuffer> next = new java.util.ArrayList<>();
         List<AtomicInteger> nextCursors = new java.util.ArrayList<>();
         for (int index = 0; index < coreCount; index++) {
@@ -575,8 +587,8 @@ public final class DashboardPage extends Page {
 
     private FilesystemHistory filesystemHistory(String mount) {
         synchronized (filesystemHistories) {
-            return filesystemHistories.computeIfAbsent(mount, ignored ->
-                    new FilesystemHistory(new TimeSeriesBuffer(), new TimeSeriesBuffer()));
+            return filesystemHistories.computeIfAbsent(mount, ignored
+                    -> new FilesystemHistory(new TimeSeriesBuffer(), new TimeSeriesBuffer()));
         }
     }
 
@@ -1038,5 +1050,6 @@ public final class DashboardPage extends Page {
     }
 
     private record FilesystemHistory(TimeSeriesBuffer read, TimeSeriesBuffer write) {
+
     }
 }

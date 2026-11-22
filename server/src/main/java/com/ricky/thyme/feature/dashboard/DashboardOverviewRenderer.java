@@ -84,7 +84,9 @@ public final class DashboardOverviewRenderer {
                 temperatureHistory, gpuHistory, diskIoHistory, eventLog, error, selectedCard, details);
     }
 
-    /** Draws the overview/detail with an explicit swap history. */
+    /**
+     * Draws the overview/detail with an explicit swap history.
+     */
     public static void draw(TextGraphics graphics, TerminalSize size, DashboardSnapshot snapshot,
             TimeSeriesBuffer cpuHistory, TimeSeriesBuffer memoryHistory, TimeSeriesBuffer swapHistory,
             TimeSeriesBuffer temperatureHistory, TimeSeriesBuffer gpuHistory,
@@ -339,8 +341,8 @@ public final class DashboardOverviewRenderer {
             if (selectedCard == 1) {
                 LineChart.drawMulti(graphics, x + 1, chartY, overlayWidth - 2, chartHeight, label,
                         chartUnit(selectedCard), List.of(
-                                new LineChart.Series("used", samples, Theme.MEMORY_SERIES, false),
-                                new LineChart.Series("swap", swapSamples, Theme.SWAP_SERIES, true)),
+                        new LineChart.Series("used", samples, Theme.MEMORY_SERIES, false),
+                        new LineChart.Series("swap", swapSamples, Theme.SWAP_SERIES, true)),
                         max, cursor, compact ? coverage : null, timeLabels(range), Theme.BRAILLE);
             } else {
                 LineChart.draw(graphics, x + 1, chartY, overlayWidth - 2, chartHeight, label,
@@ -375,7 +377,9 @@ public final class DashboardOverviewRenderer {
                 Theme.INK_MUTED);
     }
 
-    /** Full key hint when it fits, otherwise a compact variant. */
+    /**
+     * Full key hint when it fits, otherwise a compact variant.
+     */
     private static String footerHint(int width, String full, String compact) {
         return width >= full.length() ? full : compact;
     }
@@ -386,9 +390,7 @@ public final class DashboardOverviewRenderer {
     }
 
     /**
-     * Draws the drill-in for one filesystem card.  Each filesystem has its own
-     * detail overlay; {@code write} selects the write series, otherwise the
-     * read series is shown.
+     * Draws the drill-in for one filesystem card. Each filesystem has its own detail overlay; {@code write} selects the write series, otherwise the read series is shown.
      */
     private static void drawFilesystemDetail(TextGraphics graphics, int width, int height,
             List<FilesystemSeries> filesystems, OverviewCard card,
@@ -474,9 +476,7 @@ public final class DashboardOverviewRenderer {
     }
 
     /**
-     * Scales a chart to the data it can actually display: the most recent
-     * samples that fit in the plot, never below {@code floor} and optionally
-     * capped by {@code ceiling}.
+     * Scales a chart to the data it can actually display: the most recent samples that fit in the plot, never below {@code floor} and optionally capped by {@code ceiling}.
      */
     private static double adaptiveMaximum(double[] samples, int chartWidth,
             double floor, double ceiling) {
@@ -485,8 +485,7 @@ public final class DashboardOverviewRenderer {
     }
 
     /**
-     * Scales a chart to the most recent {@code visibleSamples} samples, never
-     * below {@code floor} and optionally capped by {@code ceiling}.
+     * Scales a chart to the most recent {@code visibleSamples} samples, never below {@code floor} and optionally capped by {@code ceiling}.
      */
     private static double adaptiveMaximumOver(double[] samples, int visibleSamples,
             double floor, double ceiling) {
@@ -662,7 +661,9 @@ public final class DashboardOverviewRenderer {
         }
     }
 
-    /** Legend on the left and the coverage note on the right of the note row. */
+    /**
+     * Legend on the left and the coverage note on the right of the note row.
+     */
     private static void drawLegend(TextGraphics graphics, int x, int y, int width,
             String legend, String note) {
         Theme.put(graphics, x, y, width, legend, Theme.INK_SECONDARY);
@@ -673,22 +674,32 @@ public final class DashboardOverviewRenderer {
         Theme.put(graphics, noteX, y, Math.max(0, x + width - noteX), note, Theme.INK_MUTED);
     }
 
-    /** X-axis labels for the selected range, newest at the right edge. */
+    /**
+     * X-axis labels for the selected range, newest at the right edge.
+     */
     private static String[] timeLabels(TimeSeriesBuffer.Range range) {
         return switch (range) {
-            case FIFTEEN_MINUTES -> new String[]{"-15m", "-10m", "-5m", "now"};
-            case ONE_HOUR -> new String[]{"-1h", "-40m", "-20m", "now"};
-            case SIX_HOURS -> new String[]{"-6h", "-4h", "-2h", "now"};
+            case FIFTEEN_MINUTES ->
+                new String[]{"-15m", "-10m", "-5m", "now"};
+            case ONE_HOUR ->
+                new String[]{"-1h", "-40m", "-20m", "now"};
+            case SIX_HOURS ->
+                new String[]{"-6h", "-4h", "-2h", "now"};
         };
     }
 
     private static String legendFor(int card) {
         return switch (card) {
-            case 0 -> "● total";
-            case 1 -> "● used   ○ swap";
-            case 2 -> "● temperature";
-            case 3 -> "● gpu";
-            default -> "● disk I/O";
+            case 0 ->
+                "● total";
+            case 1 ->
+                "● used   ○ swap";
+            case 2 ->
+                "● temperature";
+            case 3 ->
+                "● gpu";
+            default ->
+                "● disk I/O";
         };
     }
 
@@ -719,9 +730,12 @@ public final class DashboardOverviewRenderer {
 
     private static double axisMaximum(int card, double[] samples, int chartWidth) {
         return switch (card) {
-            case 0, 1, 3 -> adaptiveMaximum(samples, chartWidth, 10, 100);
-            case 2 -> adaptiveMaximum(samples, chartWidth, 10, 0);
-            default -> adaptiveMaximum(samples, chartWidth, 0.1, 0);
+            case 0, 1, 3 ->
+                adaptiveMaximum(samples, chartWidth, 10, 100);
+            case 2 ->
+                adaptiveMaximum(samples, chartWidth, 10, 0);
+            default ->
+                adaptiveMaximum(samples, chartWidth, 0.1, 0);
         };
     }
 
@@ -741,11 +755,11 @@ public final class DashboardOverviewRenderer {
             case 1 ->
                 "Memory currently occupied by applications and the operating system.";
             case 2 ->
-                "The latest reported thermal sensor value.";
+                "The measure of how hot a computer's central processing unit gets while running.";
             case 3 ->
-                "Work currently scheduled on the graphics device.";
+                "Share of time the graphics processor is busy.";
             case 4 ->
-                "Combined read and write throughput from sampled devices.";
+                "Combined read and write throughput from I/O devices.";
             default ->
                 "Metric explanation unavailable.";
         };
@@ -800,7 +814,9 @@ public final class DashboardOverviewRenderer {
         graphics.drawLine(0, 1, width - 1, 1, Theme.H);
     }
 
-    /** Short uptime label: {@code up 12d 4h}, {@code up 4h 20m} or {@code up 12m}. */
+    /**
+     * Short uptime label: {@code up 12d 4h}, {@code up 4h 20m} or {@code up 12m}.
+     */
     private static String uptime(long seconds) {
         long days = seconds / 86400;
         long hours = seconds % 86400 / 3600;
@@ -853,10 +869,14 @@ public final class DashboardOverviewRenderer {
         }
     }
 
-    /** Height of one KPI card row. */
+    /**
+     * Height of one KPI card row.
+     */
     private static final int CARD_HEIGHT = 5;
 
-    /** Vertical distance between two KPI card rows, including the gap. */
+    /**
+     * Vertical distance between two KPI card rows, including the gap.
+     */
     private static final int CARD_STRIDE = 6;
 
     private static int cardColumns(int width, int cardCount) {
@@ -1048,10 +1068,14 @@ public final class DashboardOverviewRenderer {
 
     private static TextColor seriesColor(int selectedCard) {
         return switch (selectedCard) {
-            case 0 -> Theme.CPU_SERIES;
-            case 1 -> Theme.MEMORY_SERIES;
-            case 4 -> Theme.IO_SERIES;
-            default -> Theme.PRIMARY;
+            case 0 ->
+                Theme.CPU_SERIES;
+            case 1 ->
+                Theme.MEMORY_SERIES;
+            case 4 ->
+                Theme.IO_SERIES;
+            default ->
+                Theme.PRIMARY;
         };
     }
 
@@ -1121,10 +1145,6 @@ public final class DashboardOverviewRenderer {
 
     private static String gib(long bytes) {
         return String.format("%.1f", bytes / (1024.0 * 1024 * 1024));
-    }
-
-    private static String memory(Long bytes) {
-        return bytes == null ? "n/a" : gib(bytes) + "GiB";
     }
 
     private static String rate(Double value) {

@@ -69,42 +69,6 @@
         <version>1.0.0.Final</version>
         <executions>
           <execution>
-            <id>add-third-party-module-descriptors</id>
-            <phase>prepare-package</phase>
-            <goals>
-              <goal>add-module-info</goal>
-            </goals>
-            <configuration>
-              <outputDirectory>${project.build.directory}/modules</outputDirectory>
-              <overwriteExistingFiles>true</overwriteExistingFiles>
-              <jdepsExtraArgs>
-                <arg>--multi-release</arg>
-                <arg>9</arg>
-                <arg>--module-path</arg>
-                <arg>${project.build.directory}/modules</arg>
-              </jdepsExtraArgs>
-              <modules>
-                <module>
-                  <artifact>
-                    <groupId>com.github.oshi</groupId>
-                    <artifactId>oshi-core</artifactId>
-                    <version>${oshi.version}</version>
-                  </artifact>
-                  <moduleInfo>
-                    <name>com.github.oshi</name>
-                    <exports>
-                      oshi;
-                      oshi.hardware;
-                      oshi.software.os;
-                      oshi.util;
-                    </exports>
-                    <requires>*;</requires>
-                  </moduleInfo>
-                </module>
-              </modules>
-            </configuration>
-          </execution>
-          <execution>
             <id>create-server-runtime</id>
             <phase>verify</phase>
             <goals>
@@ -123,91 +87,6 @@
               <noManPages>true</noManPages>
               <noHeaderFiles>true</noHeaderFiles>
               <stripDebug>true</stripDebug>
-            </configuration>
-          </execution>
-        </executions>
-      </plugin>
-      <plugin>
-        <groupId>org.codehaus.mojo</groupId>
-        <artifactId>exec-maven-plugin</artifactId>
-        <version>3.5.0</version>
-        <executions>
-          <execution>
-            <id>compile-jna-module-descriptor</id>
-            <phase>prepare-package</phase>
-            <goals>
-              <goal>exec</goal>
-            </goals>
-            <configuration>
-              <executable>${java.home}/bin/javac</executable>
-              <arguments>
-                <argument>--release</argument>
-                <argument>9</argument>
-                <argument>--module-path</argument>
-                <argument>${project.build.directory}/modules</argument>
-                <argument>--patch-module</argument>
-                <argument>com.sun.jna=${project.build.directory}/modules/jna-${jna.version}.jar</argument>
-                <argument>-d</argument>
-                <argument>${project.build.directory}/jna-module-descriptor</argument>
-                <argument>${project.basedir}/src/moditect/jna/module-info.java</argument>
-              </arguments>
-            </configuration>
-          </execution>
-          <execution>
-            <id>patch-jna-module-descriptor</id>
-            <phase>prepare-package</phase>
-            <goals>
-              <goal>exec</goal>
-            </goals>
-            <configuration>
-              <executable>${java.home}/bin/jar</executable>
-              <arguments>
-                <argument>--update</argument>
-                <argument>--file</argument>
-                <argument>${project.build.directory}/modules/jna-${jna.version}.jar</argument>
-                <argument>-C</argument>
-                <argument>${project.build.directory}/jna-module-descriptor</argument>
-                <argument>module-info.class</argument>
-              </arguments>
-            </configuration>
-          </execution>
-          <execution>
-            <id>compile-jna-platform-module-descriptor</id>
-            <phase>prepare-package</phase>
-            <goals>
-              <goal>exec</goal>
-            </goals>
-            <configuration>
-              <executable>${java.home}/bin/javac</executable>
-              <arguments>
-                <argument>--release</argument>
-                <argument>9</argument>
-                <argument>--module-path</argument>
-                <argument>${project.build.directory}/modules</argument>
-                <argument>--patch-module</argument>
-                <argument>com.sun.jna.platform=${project.build.directory}/modules/jna-platform-${jna.version}.jar</argument>
-                <argument>-d</argument>
-                <argument>${project.build.directory}/jna-platform-descriptor</argument>
-                <argument>${project.basedir}/src/moditect/jna-platform/module-info.java</argument>
-              </arguments>
-            </configuration>
-          </execution>
-          <execution>
-            <id>patch-jna-platform-module-descriptor</id>
-            <phase>prepare-package</phase>
-            <goals>
-              <goal>exec</goal>
-            </goals>
-            <configuration>
-              <executable>${java.home}/bin/jar</executable>
-              <arguments>
-                <argument>--update</argument>
-                <argument>--file</argument>
-                <argument>${project.build.directory}/modules/jna-platform-${jna.version}.jar</argument>
-                <argument>-C</argument>
-                <argument>${project.build.directory}/jna-platform-descriptor</argument>
-                <argument>module-info.class</argument>
-              </arguments>
             </configuration>
           </execution>
         </executions>

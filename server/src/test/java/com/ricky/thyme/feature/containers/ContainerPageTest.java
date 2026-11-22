@@ -7,19 +7,18 @@ import com.googlecode.lanterna.screen.Screen;
 import com.googlecode.lanterna.screen.TerminalScreen;
 import com.googlecode.lanterna.terminal.virtual.DefaultVirtualTerminal;
 import com.ricky.thyme.exec.CommandRunner;
-import org.junit.jupiter.api.Test;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
 
 class ContainerPageTest {
+
     private static final List<TerminalSize> SIZES = List.of(
             new TerminalSize(48, 15),
             new TerminalSize(80, 24),
@@ -72,9 +71,11 @@ class ContainerPageTest {
                         "Exited (0) 2h ago", "2 hours", 3, 0, "n/a", "0B / 1GiB",
                         "0%", "0B / 0B", "0B / 0B", "0")
         );
-        String mockLogs = "2026-11-22T10:00:00Z Starting nginx web server process on port 80...\n"
-                + "2026-11-22T10:00:01Z Configuration loaded successfully from /etc/nginx/nginx.conf without errors or warnings and worker processes spawned.\n"
-                + "2026-11-22T10:00:02Z Ready for connections.\n";
+        String mockLogs = """
+                          2026-11-22T10:00:00Z Starting nginx web server process on port 80...
+                          2026-11-22T10:00:01Z Configuration loaded successfully from /etc/nginx/nginx.conf without errors or warnings and worker processes spawned.
+                          2026-11-22T10:00:02Z Ready for connections.
+                          """;
 
         ContainerProvider dummyProvider = new ContainerProvider((cmd, timeout) -> {
             if ("logs".equals(cmd.get(1))) {
