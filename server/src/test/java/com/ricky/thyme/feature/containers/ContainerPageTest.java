@@ -170,6 +170,45 @@ class ContainerPageTest {
         page.onHide();
     }
 
+    @Test
+    void filtersContainersInteractively() throws IOException {
+        List<ContainerSnapshot> sampleList = List.of(
+                new ContainerSnapshot(RUNNING_ID, "web-app", "nginx:alpine", "running",
+                        "Up 4 hours", "4 hours", 0, null, "1.5%", "45MiB / 1GiB",
+                        "4.4%", "12kB / 45kB", "1.2MB / 0B", "4"),
+                new ContainerSnapshot(STOPPED_ID, "db-store", "postgres:16", "exited",
+                        "Exited (0) 2h ago", "2 hours", 3, 0, "n/a", "0B / 1GiB",
+                        "0%", "0B / 0B", "0B / 0B", "0"),
+                new ContainerSnapshot("112233445566", "cache-redis", "redis:7-alpine", "running",
+                        "Up 1 hour", "1 hour", 0, null, "0.5%", "10MiB / 1GiB",
+                        "1.0%", "1kB / 1kB", "0B / 0B", "1")
+        );
+
+        ContainerProvider dummyProvider = new ContainerProvider((cmd, timeout) -> ok(""));
+        ContainerPage page = new ContainerPage(dummyProvider);
+        injectContainers(page, sampleList);
+
+        // Press '/' to start filtering
+        page.handleKey(new KeyStroke('/', false, false));
+        assertTrue(page.capturesGlobalNavigation());
+
+        // Type 'web'
+        page.handleKey(new KeyStroke('w', false, false));
+        page.handleKey(new KeyStroke('e', false, false));
+        page.handleKey(new KeyStroke('b', false, false));
+
+        assertEquals("web-app", textContainerName(page));
+
+        // Press Enter to confirm query and navigate filtered list
+        page.handleKey(new KeyStroke(KeyType.Enter));
+        assertFalse(page.capturesGlobalNavigation()); // Returns to list navigation with active query
+        assertEquals("web-app", textContainerName(page));
+
+        // Press Esc to clear filter
+        page.handleKey(new KeyStroke(KeyType.Escape));
+        assertEquals("web-app", textContainerName(page)); // first of all 3
+    }
+
     private static String textContainerName(ContainerPage page) {
         try {
             var method = ContainerPage.class.getDeclaredMethod("selectedContainer");

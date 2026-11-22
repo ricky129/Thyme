@@ -51,6 +51,9 @@ public final class ContainerPage extends Page {
     private final AtomicInteger selectedLogLine = new AtomicInteger();
     private Instant lastSampleTime;
 
+    private boolean filtering;
+    private String filterQuery = "";
+
     public ContainerPage(ContainerProvider provider) {
         this.provider = provider;
     }
@@ -89,19 +92,66 @@ public final class ContainerPage extends Page {
 
     @Override
     public boolean capturesGlobalNavigation() {
-        return details || pendingAction != null;
+        return details || pendingAction != null || filtering;
+    }
+
+    @Override
+    public List<String> helpLines() {
+        if (pendingAction != null) {
+            return List.of(
+                    "  y             Confirm " + pendingAction,
+                    "  n / Esc       Cancel action"
+            );
+        }
+        if (details) {
+            return List.of(
+                    "  ←/→ or h/l    Switch to previous / next container",
+                    "  ↑/↓ or j/k    Select & expand recent log line",
+                    "  a             Start container (if stopped)",
+                    "  s             Stop container (if running)",
+                    "  r             Restart container",
+                    "  Esc / b       Close log viewer and return to list"
+            );
+        }
+        if (filtering) {
+            return List.of(
+                    "  Type query    Filter containers by name, image or state",
+                    "  Enter         Apply current filter and navigate filtered list",
+                    "  Esc           Cancel filter and show all containers",
+                    "  Backspace     Delete character"
+            );
+        }
+        return List.of(
+                "  ↑/↓ or j/k    Select container in list",
+                "  Enter         Open container details & view recent logs",
+                "  /             Search / filter containers",
+                "  r             Refresh containers list now",
+                "  1..2 / Tab    Switch to another page"
+        );
     }
 
     @Override
     public void handleKey(KeyStroke key) {
         if (key.getKeyType() == KeyType.Escape) {
-            if (pendingAction != null) {
+            if (filtering) {
+                filtering = false;
+                filterQuery = "";
+                selected.set(0);
+            } else if (pendingAction != null) {
                 pendingAction = null;
                 message.set("Action cancelled");
             } else if (details) {
                 details = false;
                 logs.set(null);
+            } else if (!filterQuery.isEmpty()) {
+                filterQuery = "";
+                selected.set(0);
             }
+            return;
+        }
+
+        if (filtering) {
+            handleFilterKey(key);
             return;
         }
 
@@ -178,7 +228,7 @@ public final class ContainerPage extends Page {
 
     private void handleListKey(KeyStroke key) {
         if (key.getKeyType() == KeyType.ArrowDown) {
-            selected.updateAndGet(val -> Math.min(val + 1, Math.max(0, containers.get().size() - 1)));
+            selected.updateAndGet(val -> Math.min(val + 1, Math.max(0, filteredContainers().size() - 1)));
             return;
         }
         if (key.getKeyType() == KeyType.ArrowUp) {
@@ -186,7 +236,7 @@ public final class ContainerPage extends Page {
             return;
         }
         if (key.getKeyType() == KeyType.Enter) {
-            if (!containers.get().isEmpty()) {
+            if (!filteredContainers().isEmpty()) {
                 details = true;
                 selectedLogLine.set(0);
                 logs.set(null);
@@ -201,12 +251,50 @@ public final class ContainerPage extends Page {
 
         char ch = Character.toLowerCase(key.getCharacter());
         if (ch == 'j') {
-            selected.updateAndGet(val -> Math.min(val + 1, Math.max(0, containers.get().size() - 1)));
+            selected.updateAndGet(val -> Math.min(val + 1, Math.max(0, filteredContainers().size() - 1)));
         } else if (ch == 'k') {
             selected.updateAndGet(val -> Math.max(0, val - 1));
         } else if (ch == 'r') {
             refresh();
+        } else if (ch == '/') {
+            filtering = true;
         }
+    }
+
+    private void handleFilterKey(KeyStroke key) {
+        if (key.getKeyType() == KeyType.Enter) {
+            filtering = false;
+            return;
+        }
+        if (key.getKeyType() == KeyType.Backspace) {
+            if (!filterQuery.isEmpty()) {
+                filterQuery = filterQuery.substring(0, filterQuery.length() - 1);
+                selected.set(0);
+            }
+            return;
+        }
+        Character c = key.getCharacter();
+        if (c != null && !Character.isISOControl(c)) {
+            filterQuery += c;
+            selected.set(0);
+        }
+    }
+
+    private List<ContainerSnapshot> filteredContainers() {
+        List<ContainerSnapshot> list = containers.get();
+        if (filterQuery.isEmpty()) {
+            return list;
+        }
+        String q = filterQuery.toLowerCase();
+        List<ContainerSnapshot> result = new ArrayList<>();
+        for (ContainerSnapshot c : list) {
+            if ((c.name() != null && c.name().toLowerCase().contains(q))
+                    || (c.image() != null && c.image().toLowerCase().contains(q))
+                    || (c.state() != null && c.state().toLowerCase().contains(q))) {
+                result.add(c);
+            }
+        }
+        return result;
     }
 
     private void scrollLogLine(int delta) {
@@ -222,7 +310,7 @@ public final class ContainerPage extends Page {
     }
 
     private void switchContainer(int delta) {
-        List<ContainerSnapshot> list = containers.get();
+        List<ContainerSnapshot> list = filteredContainers();
         if (list.isEmpty()) {
             return;
         }
@@ -345,7 +433,7 @@ public final class ContainerPage extends Page {
     }
 
     private ContainerSnapshot selectedContainer() {
-        List<ContainerSnapshot> current = containers.get();
+        List<ContainerSnapshot> current = filteredContainers();
         int index = selected.get();
         return index < 0 || index >= current.size() ? null : current.get(index);
     }
@@ -414,23 +502,32 @@ public final class ContainerPage extends Page {
         graphics.drawLine(0, y, width - 1, y, Theme.H);
         Dock.draw(graphics, 1, y, width - 2, DOCK_LABELS, 1);
 
-        String hints = pendingAction != null
-                ? "y confirm  n cancel  Esc close"
-                : details
-                        ? "←/→ container  ↑↓ select/expand log  a start  s stop  r restart  Esc close"
-                        : "↑↓ select  Enter details  r refresh  q quit";
+        String hints;
+        if (pendingAction != null) {
+            hints = "y confirm  n cancel  Esc close";
+        } else if (details) {
+            hints = "←/→ container  ↑↓ select/expand log  a start  s stop  r restart  Esc close";
+        } else if (filtering) {
+            hints = "Filter: " + filterQuery + "_   (Enter apply · Esc cancel)";
+        } else if (!filterQuery.isEmpty()) {
+            hints = "Filter: " + filterQuery + "   (/ edit · Esc clear)   ↑↓ select  Enter details";
+        } else {
+            hints = "↑↓ select  Enter details  / filter  r refresh  q quit";
+        }
         int hintsX = Math.max(1, width - hints.length() - 1);
         if (hintsX > 25) {
-            Theme.put(graphics, hintsX, y, hints.length(), hints, Theme.INK_MUTED);
+            TextColor hintColor = filtering ? Theme.ACCENT : Theme.INK_MUTED;
+            Theme.put(graphics, hintsX, y, hints.length(), hints, hintColor);
         }
     }
 
     private void drawBody(TextGraphics graphics, int width, int y, int height) {
-        List<ContainerSnapshot> list = containers.get();
-        long total = list.size();
-        long running = list.stream().filter(c -> "running".equalsIgnoreCase(c.state())).count();
+        List<ContainerSnapshot> all = containers.get();
+        List<ContainerSnapshot> list = filteredContainers();
+        long total = all.size();
+        long running = all.stream().filter(c -> "running".equalsIgnoreCase(c.state())).count();
         long stopped = total - running;
-        long restarts = list.stream().mapToInt(ContainerSnapshot::restartCount).sum();
+        long restarts = all.stream().mapToInt(ContainerSnapshot::restartCount).sum();
 
         boolean showKpis = height >= 14 && width >= 60;
         int tableY = y;
@@ -459,7 +556,8 @@ public final class ContainerPage extends Page {
             tableHeight = height - kpiH - 1;
         }
 
-        Panel.draw(graphics, 0, tableY, width, tableHeight, "Containers · " + total);
+        Panel.draw(graphics, 0, tableY, width, tableHeight,
+                filterQuery.isEmpty() ? "Containers · " + total : "Containers · " + list.size() + "/" + total + " (filtered)");
 
         String currentErr = error.get();
         if (currentErr != null) {
@@ -467,7 +565,10 @@ public final class ContainerPage extends Page {
             return;
         }
         if (list.isEmpty()) {
-            Theme.put(graphics, 2, tableY + 2, width - 4, "No containers found. " + message.get(), Theme.INK_MUTED);
+            String emptyMsg = filterQuery.isEmpty()
+                    ? "No containers found. " + message.get()
+                    : "No containers match '" + filterQuery + "'. Press Esc to clear filter.";
+            Theme.put(graphics, 2, tableY + 2, width - 4, emptyMsg, Theme.INK_MUTED);
             return;
         }
 

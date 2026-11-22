@@ -102,11 +102,11 @@ public final class DashboardOverviewRenderer {
 
         drawHeader(graphics, width, snapshot);
         int footerY = height - 1;
-        drawFooter(graphics, width, footerY);
+        drawFooter(graphics, width, footerY, false, "");
         if (details) {
             drawOverview(graphics, size, snapshot, cpuHistory, memoryHistory,
                     temperatureHistory, gpuHistory, diskIoHistory, eventLog, error,
-                    selectedCard, List.of());
+                    selectedCard, List.of(), "");
             drawDetail(graphics, width, footerY, snapshot, cpuHistory, memoryHistory,
                     swapHistory, temperatureHistory, gpuHistory, diskIoHistory, selectedCard,
                     TimeSeriesBuffer.Range.FIFTEEN_MINUTES, -1, false, true, List.of(), 0,
@@ -115,14 +115,14 @@ public final class DashboardOverviewRenderer {
         }
         drawOverview(graphics, size, snapshot, cpuHistory, memoryHistory,
                 temperatureHistory, gpuHistory, diskIoHistory, eventLog, error,
-                selectedCard, List.of());
+                selectedCard, List.of(), "");
     }
 
     private static void drawOverview(TextGraphics graphics, TerminalSize size, DashboardSnapshot snapshot,
             TimeSeriesBuffer cpuHistory, TimeSeriesBuffer memoryHistory,
             TimeSeriesBuffer temperatureHistory, TimeSeriesBuffer gpuHistory, TimeSeriesBuffer diskIoHistory,
             EventLogBuffer eventLog, String error, int selectedCard,
-            List<FilesystemSeries> filesystems) {
+            List<FilesystemSeries> filesystems, String eventFilter) {
         cpuHistory = safeHistory(cpuHistory);
         memoryHistory = safeHistory(memoryHistory);
         temperatureHistory = safeHistory(temperatureHistory);
@@ -148,7 +148,7 @@ public final class DashboardOverviewRenderer {
             int eventsWidth = Math.max(28, width / 3);
             drawCharts(graphics, 0, bodyY, width - eventsWidth - 1, bodyHeight,
                     cpuHistory, memoryHistory, error);
-            drawEvents(graphics, width - eventsWidth, bodyY, eventsWidth, bodyHeight, eventLog);
+            drawEvents(graphics, width - eventsWidth, bodyY, eventsWidth, bodyHeight, eventLog, eventFilter);
         } else {
             drawCharts(graphics, 0, bodyY, width, bodyHeight, cpuHistory, memoryHistory, error);
         }
@@ -195,6 +195,24 @@ public final class DashboardOverviewRenderer {
             boolean perCore, boolean explainer, List<TimeSeriesBuffer> coreHistories,
             int selectedCore, int[] coreCursors, List<FilesystemSeries> filesystems,
             boolean filesystemWrite) {
+        draw(graphics, size, snapshot, cpuHistory, memoryHistory, swapHistory,
+                temperatureHistory, gpuHistory, diskIoHistory, eventLog, error,
+                selectedCard, details, range, cursor, perCore, explainer,
+                coreHistories, selectedCore, coreCursors, filesystems,
+                filesystemWrite, false, "");
+    }
+
+    /**
+     * Draws the overview and detail overlay with support for event log filtering.
+     */
+    public static void draw(TextGraphics graphics, TerminalSize size, DashboardSnapshot snapshot,
+            TimeSeriesBuffer cpuHistory, TimeSeriesBuffer memoryHistory, TimeSeriesBuffer swapHistory,
+            TimeSeriesBuffer temperatureHistory, TimeSeriesBuffer gpuHistory,
+            TimeSeriesBuffer diskIoHistory, EventLogBuffer eventLog, String error,
+            int selectedCard, boolean details, TimeSeriesBuffer.Range range, int cursor,
+            boolean perCore, boolean explainer, List<TimeSeriesBuffer> coreHistories,
+            int selectedCore, int[] coreCursors, List<FilesystemSeries> filesystems,
+            boolean filesystemWrite, boolean filteringEvents, String eventFilter) {
         cpuHistory = safeHistory(cpuHistory);
         memoryHistory = safeHistory(memoryHistory);
         swapHistory = safeHistory(swapHistory);
@@ -214,10 +232,10 @@ public final class DashboardOverviewRenderer {
             return;
         }
         drawHeader(graphics, width, snapshot);
-        drawFooter(graphics, width, height - 1);
+        drawFooter(graphics, width, height - 1, filteringEvents, eventFilter);
         drawOverview(graphics, size, snapshot, cpuHistory, memoryHistory,
                 temperatureHistory, gpuHistory, diskIoHistory, eventLog, error,
-                selectedCard, filesystems);
+                selectedCard, filesystems, eventFilter);
         if (details) {
             drawDetail(graphics, width, height - 1, snapshot, cpuHistory, memoryHistory,
                     swapHistory, temperatureHistory, gpuHistory, diskIoHistory, selectedCard,
@@ -795,11 +813,24 @@ public final class DashboardOverviewRenderer {
         return "up " + Math.max(1, minutes) + "m";
     }
 
-    private static void drawFooter(TextGraphics graphics, int width, int y) {
+    private static void drawFooter(TextGraphics graphics, int width, int y, boolean filteringEvents, String eventFilter) {
         graphics.setForegroundColor(Theme.HAIRLINE);
         graphics.drawLine(0, y, width - 1, y, Theme.H);
         Dock.draw(graphics, 1, y, width - 2, DOCK_LABELS, 0);
-        Theme.put(graphics, Math.max(1, width - 29), y, 28, "↑↓ select  ? help  q quit", Theme.INK_MUTED);
+
+        String hints;
+        if (filteringEvents) {
+            hints = "Filter events: " + (eventFilter == null ? "" : eventFilter) + "_   (Enter apply · Esc cancel)";
+        } else if (eventFilter != null && !eventFilter.isEmpty()) {
+            hints = "Events: " + eventFilter + " (/ edit · Esc clear)   ↑↓ select  Enter detail";
+        } else {
+            hints = "↑↓ select  Enter detail  / filter events  ? help  q quit";
+        }
+        int hintsX = Math.max(1, width - hints.length() - 1);
+        if (hintsX > 25) {
+            TextColor hintColor = filteringEvents ? Theme.ACCENT : Theme.INK_MUTED;
+            Theme.put(graphics, hintsX, y, hints.length(), hints, hintColor);
+        }
     }
 
     private static void drawCompact(TextGraphics graphics, int width, int y, int height,
@@ -988,12 +1019,19 @@ public final class DashboardOverviewRenderer {
     }
 
     private static void drawEvents(TextGraphics graphics, int x, int y, int width, int height,
-            EventLogBuffer eventLog) {
+            EventLogBuffer eventLog, String eventFilter) {
         List<EventLog.Entry> entries = new ArrayList<>();
+        String q = (eventFilter == null || eventFilter.isBlank()) ? null : eventFilter.toLowerCase();
         for (EventLogBuffer.Event event : eventLog.snapshot()) {
-            entries.add(new EventLog.Entry(CLOCK.format(event.time()), severityColor(event.severity()), event.message()));
+            if (q == null || event.message().toLowerCase().contains(q)
+                    || event.severity().name().toLowerCase().contains(q)) {
+                entries.add(new EventLog.Entry(CLOCK.format(event.time()), severityColor(event.severity()), event.message()));
+            }
         }
-        EventLog.draw(graphics, x, y, width, height, "Events • " + eventLog.size(), entries);
+        String title = (q == null)
+                ? "Events • " + eventLog.size()
+                : "Events • " + entries.size() + "/" + eventLog.size() + " (filtered)";
+        EventLog.draw(graphics, x, y, width, height, title, entries);
     }
 
     private static String chartUnit(int selectedCard) {

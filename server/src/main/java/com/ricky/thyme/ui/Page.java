@@ -39,6 +39,11 @@ public abstract class Page implements AutoCloseable {
         return false;
     }
 
+    /** Contextual shortcut lines to display in the help overlay for this page. */
+    public java.util.List<String> helpLines() {
+        return java.util.List.of();
+    }
+
     public abstract void refresh();
 
     public abstract void render(TextGraphics graphics, TerminalSize size);

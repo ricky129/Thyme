@@ -93,6 +93,9 @@ public final class DashboardPage extends Page {
     private final AtomicBoolean explainer = new AtomicBoolean(true);
     private final AtomicLong generation = new AtomicLong();
     private Executor background;
+
+    private boolean filteringEvents;
+    private String eventFilterQuery = "";
     // sample() writes errors on a worker; render() reads them on the UI thread;
     // AtomicReference to make the updates visible.
     private final AtomicReference<String> pageError = new AtomicReference<>();
@@ -153,10 +156,69 @@ public final class DashboardPage extends Page {
     }
 
     @Override
+    public List<String> helpLines() {
+        if (details.get()) {
+            OverviewCard card = currentCard();
+            if (card.kind() == OverviewCard.Kind.CPU) {
+                return List.of(
+                        "  ←/→           Switch between KPI drill-ins",
+                        "  h/l           Move inspection cursor left / right",
+                        "  [ / ] or t    Change time range (15M / 1H / 6H)",
+                        "  Tab           Toggle Total CPU / Per-core view",
+                        "  ↑/↓ or j/k    Select core (when in per-core mode)",
+                        "  e             Toggle metric explanation box",
+                        "  Esc / Enter   Close detail overlay"
+                );
+            }
+            if (card.filesystem()) {
+                return List.of(
+                        "  ←/→           Switch between KPI drill-ins",
+                        "  h/l           Move inspection cursor left / right",
+                        "  [ / ] or t    Change time range (15M / 1H / 6H)",
+                        "  Tab or ↑/↓    Toggle Read / Write I/O series",
+                        "  e             Toggle metric explanation box",
+                        "  Esc / Enter   Close detail overlay"
+                );
+            }
+            return List.of(
+                    "  ←/→           Switch between KPI drill-ins",
+                    "  h/l           Move inspection cursor left / right",
+                    "  [ / ] or t    Change time range (15M / 1H / 6H)",
+                    "  e             Toggle metric explanation box",
+                    "  Esc / Enter   Close detail overlay"
+            );
+        }
+        if (filteringEvents) {
+            return List.of(
+                    "  Type query    Filter events by message or severity",
+                    "  Enter         Apply current event filter",
+                    "  Esc           Cancel filter and show all events",
+                    "  Backspace     Delete character"
+            );
+        }
+        return List.of(
+                "  ←/→ or h/l    Select KPI card",
+                "  Enter         Open detail overlay for selected KPI",
+                "  /             Filter events in event log",
+                "  r             Refresh metrics now",
+                "  1..2 / Tab    Switch to another page"
+        );
+    }
+
+    @Override
     public void handleKey(KeyStroke key) {
+        if (filteringEvents) {
+            handleEventFilterKey(key);
+            return;
+        }
+
         OverviewCard card = currentCard();
         if (key.getKeyType() == KeyType.Escape) {
-            details.set(false);
+            if (details.get()) {
+                details.set(false);
+            } else if (!eventFilterQuery.isEmpty()) {
+                eventFilterQuery = "";
+            }
         } else if (key.getKeyType() == KeyType.Enter) {
             if (details.get()) {
                 details.set(false);
@@ -203,9 +265,34 @@ public final class DashboardPage extends Page {
         } else if (!details.get() && isPreviousCardKey(key)) {
             selectedCard.updateAndGet(value -> Math.max(0, value - 1));
         } else if (key.getKeyType() == KeyType.Character && key.getCharacter() != null) {
-            if (Character.toLowerCase(key.getCharacter()) == 'r') {
+            char ch = Character.toLowerCase(key.getCharacter());
+            if (ch == 'r') {
                 refresh();
+            } else if (ch == '/' && !details.get()) {
+                filteringEvents = true;
             }
+        }
+    }
+
+    private void handleEventFilterKey(KeyStroke key) {
+        if (key.getKeyType() == KeyType.Enter) {
+            filteringEvents = false;
+            return;
+        }
+        if (key.getKeyType() == KeyType.Escape) {
+            filteringEvents = false;
+            eventFilterQuery = "";
+            return;
+        }
+        if (key.getKeyType() == KeyType.Backspace) {
+            if (!eventFilterQuery.isEmpty()) {
+                eventFilterQuery = eventFilterQuery.substring(0, eventFilterQuery.length() - 1);
+            }
+            return;
+        }
+        Character c = key.getCharacter();
+        if (c != null && !Character.isISOControl(c)) {
+            eventFilterQuery += c;
         }
     }
 
@@ -507,7 +594,7 @@ public final class DashboardPage extends Page {
 
     @Override
     public boolean capturesGlobalNavigation() {
-        return details.get();
+        return details.get() || filteringEvents;
     }
 
     TimeSeriesBuffer.Range detailRange() {
@@ -604,7 +691,7 @@ public final class DashboardPage extends Page {
                 eventLog, pageError.get(), selectedCard.get(), details.get(), detailRange.get(),
                 detailCursor(), perCore.get(), explainer.get(), coreHistories.get(), selectedCore.get(),
                 coreCursors.get().stream().mapToInt(AtomicInteger::get).toArray(),
-                filesystemSeries(), filesystemWrite.get());
+                filesystemSeries(), filesystemWrite.get(), filteringEvents, eventFilterQuery);
     }
 
     private List<FilesystemSeries> filesystemSeries() {
