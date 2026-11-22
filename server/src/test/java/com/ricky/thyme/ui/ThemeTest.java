@@ -6,6 +6,13 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ThemeTest {
 
+    @Test
+    void sanitizeStripsAnsiAndControlCharacters() {
+        assertEquals("hello world", Theme.sanitize("\u001b[31mhello \u001b[0mworld"));
+        assertEquals("tab    space", Theme.sanitize("tab\tspace"));
+        assertEquals("clean", Theme.sanitize("\u001b[1;32mclean\u0000\u0007"));
+    }
+
     // ── clipToWidth ──────────────────────────────────────────────────────────
 
     @Test

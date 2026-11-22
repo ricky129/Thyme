@@ -200,12 +200,37 @@ public final class Theme {
     public static void put(
             TextGraphics g, int x, int y, int maxWidth, String text, TextColor color, boolean bold) {
         if (maxWidth <= 0 || text == null || text.isEmpty()) return;
-        String clipped = clipToWidth(text, maxWidth);
+        String sanitized = sanitize(text);
+        String clipped = clipToWidth(sanitized, maxWidth);
         g.setForegroundColor(color);
         if (bold)
             g.putString(x, y, clipped, SGR.BOLD);
         else
             g.putString(x, y, clipped);
+    }
+
+    private static final java.util.regex.Pattern ANSI_ESCAPE =
+            java.util.regex.Pattern.compile("\\u001B\\[[;?0-9]*[a-zA-Z]");
+
+    /**
+     * Strips ANSI escape sequences and non-printable control characters (except basic space)
+     * so that Lanterna does not throw {@link IllegalArgumentException} on control chars like 0x1b.
+     */
+    public static String sanitize(String text) {
+        if (text == null || text.isEmpty()) {
+            return "";
+        }
+        String stripped = ANSI_ESCAPE.matcher(text).replaceAll("");
+        StringBuilder sb = new StringBuilder(stripped.length());
+        for (int i = 0; i < stripped.length(); i++) {
+            char c = stripped.charAt(i);
+            if (c == '\t') {
+                sb.append("    ");
+            } else if (c >= 32 && c != 127) {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     /**
