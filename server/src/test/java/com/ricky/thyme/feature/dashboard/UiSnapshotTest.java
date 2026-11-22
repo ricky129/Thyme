@@ -125,7 +125,7 @@ class UiSnapshotTest {
     }
 
     @Test
-    void writesFilesystemOverviewAndDiskGridSnapshots() throws IOException {
+    void writesFilesystemOverviewAndDiskDetailSnapshots() throws IOException {
         DashboardSnapshot snapshot = snapshotWithFilesystems();
         List<FilesystemSeries> filesystems = filesystemSeries(snapshot);
         TimeSeriesBuffer cpu = history(42, 900);
@@ -139,14 +139,20 @@ class UiSnapshotTest {
                     DashboardOverviewRenderer.draw(graphics, terminalSize, snapshot, cpu, memory,
                             swap, temperature, gpu, disk, new EventLogBuffer(), null, 0, false,
                             TimeSeriesBuffer.Range.FIFTEEN_MINUTES, -1, false, true,
-                            List.<TimeSeriesBuffer>of(), 0, new int[0], filesystems, 0));
+                            List.<TimeSeriesBuffer>of(), 0, new int[0], filesystems, false));
             writeSnapshot("disk-detail", size, (graphics, terminalSize) ->
                     DashboardOverviewRenderer.draw(graphics, terminalSize, snapshot, cpu, memory,
                             swap, temperature, gpu, disk, new EventLogBuffer(), null,
                             OverviewCard.SYSTEM_CARD_COUNT + 1, true,
                             TimeSeriesBuffer.Range.FIFTEEN_MINUTES, 898, false, true,
-                            List.<TimeSeriesBuffer>of(), 0, new int[0], filesystems, 1));
+                            List.<TimeSeriesBuffer>of(), 0, new int[0], filesystems, false));
         }
+        writeSnapshot("disk-detail-write", new TerminalSize(120, 35), (graphics, terminalSize) ->
+                DashboardOverviewRenderer.draw(graphics, terminalSize, snapshot, cpu, memory,
+                        swap, temperature, gpu, disk, new EventLogBuffer(), null,
+                        OverviewCard.SYSTEM_CARD_COUNT + 1, true,
+                        TimeSeriesBuffer.Range.FIFTEEN_MINUTES, 898, false, true,
+                        List.<TimeSeriesBuffer>of(), 0, new int[0], filesystems, true));
         String overview = Files.readString(
                 Path.of("target", "ui-snapshots", "filesystem-overview-120x35.txt"));
         assertTrue(overview.contains("/home"));
@@ -154,8 +160,16 @@ class UiSnapshotTest {
         String detail = Files.readString(
                 Path.of("target", "ui-snapshots", "disk-detail-120x35.txt"));
         assertTrue(detail.contains("Disk I/O"));
-        assertTrue(detail.contains("↑↓ filesystem"));
-        assertTrue(detail.contains("/"));
+        assertTrue(detail.contains("/home"));
+        assertTrue(detail.contains("I/O: [Read] Write"));
+        assertTrue(detail.contains("8M/s"),
+                "the axis must scale to the visible samples instead of a fixed range");
+        assertFalse(detail.contains("↑↓ filesystem"),
+                "each filesystem must have its own drill-in, not a shared selector");
+        String writeDetail = Files.readString(
+                Path.of("target", "ui-snapshots", "disk-detail-write-120x35.txt"));
+        assertTrue(writeDetail.contains("I/O: Read [Write]"));
+        assertTrue(writeDetail.contains("/home · write"));
     }
 
     @Test

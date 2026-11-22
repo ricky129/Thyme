@@ -110,7 +110,7 @@ public final class DashboardOverviewRenderer {
             drawDetail(graphics, width, footerY - 2, snapshot, cpuHistory, memoryHistory,
                     swapHistory, temperatureHistory, gpuHistory, diskIoHistory, selectedCard,
                     TimeSeriesBuffer.Range.FIFTEEN_MINUTES, -1, false, true, List.of(), 0,
-                    new int[0], List.of(), 0);
+                    new int[0], List.of(), false);
             return;
         }
         drawOverview(graphics, size, snapshot, cpuHistory, memoryHistory,
@@ -181,7 +181,7 @@ public final class DashboardOverviewRenderer {
         draw(graphics, size, snapshot, cpuHistory, memoryHistory, swapHistory,
                 temperatureHistory, gpuHistory, diskIoHistory, eventLog, error,
                 selectedCard, details, range, cursor, perCore, explainer,
-                coreHistories, selectedCore, coreCursors, List.of(), 0);
+                coreHistories, selectedCore, coreCursors, List.of(), false);
     }
 
     /**
@@ -193,8 +193,8 @@ public final class DashboardOverviewRenderer {
             TimeSeriesBuffer diskIoHistory, EventLogBuffer eventLog, String error,
             int selectedCard, boolean details, TimeSeriesBuffer.Range range, int cursor,
             boolean perCore, boolean explainer, List<TimeSeriesBuffer> coreHistories,
-            int selectedCore, int[] coreCursors,
-            List<FilesystemSeries> filesystems, int selectedFilesystem) {
+            int selectedCore, int[] coreCursors, List<FilesystemSeries> filesystems,
+            boolean filesystemWrite) {
         cpuHistory = safeHistory(cpuHistory);
         memoryHistory = safeHistory(memoryHistory);
         swapHistory = safeHistory(swapHistory);
@@ -222,7 +222,7 @@ public final class DashboardOverviewRenderer {
             drawDetail(graphics, width, height - 3, snapshot, cpuHistory, memoryHistory,
                     swapHistory, temperatureHistory, gpuHistory, diskIoHistory, selectedCard,
                     range, cursor, perCore, explainer, coreHistories, selectedCore, coreCursors,
-                    filesystems, selectedFilesystem);
+                    filesystems, filesystemWrite);
         }
     }
 
@@ -237,11 +237,11 @@ public final class DashboardOverviewRenderer {
             TimeSeriesBuffer diskIoHistory, int selectedCard,
             TimeSeriesBuffer.Range range, int cursor, boolean perCore, boolean explainer,
             List<TimeSeriesBuffer> coreHistories, int selectedCore, int[] coreCursors,
-            List<FilesystemSeries> filesystems, int selectedFilesystem) {
+            List<FilesystemSeries> filesystems, boolean filesystemWrite) {
         OverviewCard card = cardAt(snapshot, selectedCard);
         if (card.filesystem()) {
-            drawFilesystemDetail(graphics, width, height, filesystems, selectedFilesystem,
-                    range, cursor, explainer);
+            drawFilesystemDetail(graphics, width, height, filesystems, card,
+                    range, cursor, explainer, filesystemWrite);
             return;
         }
         String label = card.detailLabel();
@@ -290,27 +290,33 @@ public final class DashboardOverviewRenderer {
                 drawDetailSummary(graphics, snapshot, selectedCard, innerX, detailY, innerW, true, selectedCore);
             }
             Theme.put(graphics, innerX, y + overlayHeight - 1, innerW,
-                    "↑↓ core   ←/→ cursor   [ ] range   Tab total/per-core   Esc close", Theme.INK_MUTED);
+                    footerHint(innerW,
+                            "↑↓ core   ←/→ drill-in   h/l cursor   [ ] range   Tab total/per-core   Esc close",
+                            "↑↓ core  ←/→ drill  [ ]  Tab  Esc"),
+                    Theme.INK_MUTED);
             return;
         }
         double[] samples = history == null ? new double[0] : history.samples(range);
         int chartY = y + 4;
         int chartHeight = Math.max(4, overlayHeight - (explainer ? 13 : 10));
-        double max = axisMaximum(selectedCard, samples, history, range);
+        double[] swapSamples = selectedCard == 1 ? swapHistory.samples(range) : new double[0];
+        double max = selectedCard == 1
+                ? Math.max(axisMaximum(1, samples, overlayWidth - 2),
+                        axisMaximum(1, swapSamples, overlayWidth - 2))
+                : axisMaximum(selectedCard, samples, overlayWidth - 2);
         if (history == null) {
             Theme.put(graphics, innerX, chartY, innerW, "history unavailable for this metric", Theme.INK_MUTED);
         } else {
-            double[] swapSamples = selectedCard == 1 ? swapHistory.samples(range) : new double[0];
             if (selectedCard == 1) {
                 LineChart.drawMulti(graphics, x + 1, chartY, overlayWidth - 2, chartHeight, label,
                         chartUnit(selectedCard), List.of(
                                 new LineChart.Series("used", samples, Theme.MEMORY_SERIES, false),
                                 new LineChart.Series("swap", swapSamples, Theme.SWAP_SERIES, true)),
-                        max, cursor, history.coverageNote(range), false);
+                        max, cursor, history.coverageNote(range), Theme.BRAILLE);
             } else {
                 LineChart.draw(graphics, x + 1, chartY, overlayWidth - 2, chartHeight, label,
                         chartUnit(selectedCard), samples, max, seriesColor(selectedCard), cursor,
-                        history.coverageNote(range), false);
+                        history.coverageNote(range), Theme.BRAILLE);
             }
             if (cursor >= 0 && cursor < samples.length && !Double.isNaN(samples[cursor])) {
                 String readout = "▸ cursor " + formatMetric(samples[cursor], selectedCard);
@@ -329,7 +335,15 @@ public final class DashboardOverviewRenderer {
         }
         drawDetailSummary(graphics, snapshot, selectedCard, innerX, detailY, innerW, perCore, selectedCore);
         Theme.put(graphics, innerX, y + overlayHeight - 1, innerW,
-                "←/→ cursor   [ ] range   e explain   Esc close", Theme.INK_MUTED);
+                footerHint(innerW,
+                        "←/→ drill-in   h/l cursor   [ ] range   e explain   Esc close",
+                        "←/→ drill  h/l cur  [ ] range  e  Esc"),
+                Theme.INK_MUTED);
+    }
+
+    /** Full key hint when it fits, otherwise a compact variant. */
+    private static String footerHint(int width, String full, String compact) {
+        return width >= full.length() ? full : compact;
     }
 
     private static OverviewCard cardAt(DashboardSnapshot snapshot, int index) {
@@ -337,49 +351,58 @@ public final class DashboardOverviewRenderer {
         return cards.get(Math.max(0, Math.min(index, cards.size() - 1)));
     }
 
+    /**
+     * Draws the drill-in for one filesystem card.  Each filesystem has its own
+     * detail overlay; {@code write} selects the write series, otherwise the
+     * read series is shown.
+     */
     private static void drawFilesystemDetail(TextGraphics graphics, int width, int height,
-            List<FilesystemSeries> filesystems, int selectedFilesystem,
-            TimeSeriesBuffer.Range range, int cursor, boolean explainer) {
+            List<FilesystemSeries> filesystems, OverviewCard card,
+            TimeSeriesBuffer.Range range, int cursor, boolean explainer, boolean write) {
         int overlayWidth = Math.max(44, Math.min(width - 4, (int) Math.round(width * 0.85)));
         int overlayHeight = Math.max(11, Math.min(height - 1, (int) Math.round(height * 0.90)));
         int x = (width - overlayWidth) / 2;
         int y = Math.max(2, (height - overlayHeight) / 2 + 1);
         graphics.setBackgroundColor(Theme.SURFACE);
         graphics.fillRectangle(new TerminalPosition(x, y), new TerminalSize(overlayWidth, overlayHeight), ' ');
-        Panel.draw(graphics, x, y, overlayWidth, overlayHeight, "Disk I/O  ·  Esc close");
+        Panel.draw(graphics, x, y, overlayWidth, overlayHeight,
+                "Disk I/O  ·  " + card.detailLabel() + "  ·  Esc close");
         int innerX = x + 2;
         int innerW = overlayWidth - 4;
-        if (filesystems.isEmpty()) {
+        FilesystemSeries filesystem = findFilesystem(filesystems, card.mountPoint());
+        if (filesystem == null) {
             Theme.put(graphics, innerX, y + 2, innerW,
-                    "No user-visible filesystems detected", Theme.INK_MUTED);
+                    "Filesystem " + card.detailLabel() + " is no longer available", Theme.INK_MUTED);
             Theme.put(graphics, innerX, y + overlayHeight - 1, innerW,
                     "Esc close", Theme.INK_MUTED);
             return;
         }
-        int selected = Math.max(0, Math.min(selectedFilesystem, filesystems.size() - 1));
-        FilesystemSeries filesystem = filesystems.get(selected);
         Theme.put(graphics, innerX, y + 2, innerW,
-                "Filesystems " + filesystems.size() + "   selected " + filesystem.mountPoint()
-                + "   R " + mibRate(mib(filesystem.readBytesPerSecond()))
-                + "   W " + mibRate(mib(filesystem.writeBytesPerSecond())), Theme.INK);
-        String coverage = filesystem.readHistory().coverageNote(range);
+                "Read " + mibRate(mib(filesystem.readBytesPerSecond()))
+                + "   Write " + mibRate(mib(filesystem.writeBytesPerSecond()))
+                + "   Active " + activeText(filesystem.utilizationPercent()), Theme.INK);
+        TimeSeriesBuffer history = write ? filesystem.writeHistory() : filesystem.readHistory();
+        String coverage = history.coverageNote(range);
         Theme.put(graphics, innerX, y + 3, innerW,
                 rangeTabs(range) + (coverage == null ? "" : "  " + coverage)
-                + "   fs " + (selected + 1) + "/" + filesystems.size()
-                + (filesystems.size() > 1 ? "  (↑↓)" : ""), Theme.INK_SECONDARY);
+                + "   I/O: " + (write ? "Read [Write]" : "[Read] Write") + " (↑↓)",
+                Theme.INK_SECONDARY);
         int chartY = y + 4;
         boolean compact = overlayHeight < 20;
-        int gridHeight = compact
-                ? Math.max(1, overlayHeight - 5)
-                : Math.max(3, overlayHeight - (explainer ? 13 : 10));
-        drawFilesystemGrid(graphics, innerX, chartY, innerW, gridHeight,
-                filesystems, range, selected, cursor);
-        int detailY = chartY + gridHeight + 1;
-        double[] samples = combinedSamples(filesystem, range);
-        if (cursor >= 0 && cursor < samples.length && !Double.isNaN(samples[cursor])) {
+        int chartHeight = compact
+                ? Math.max(3, overlayHeight - 5)
+                : Math.max(4, overlayHeight - (explainer ? 13 : 10));
+        double[] samples = history.samples(range);
+        String series = write ? "write" : "read";
+        TextColor seriesColor = write ? Theme.SWAP_SERIES : Theme.IO_SERIES;
+        LineChart.draw(graphics, x + 1, chartY, overlayWidth - 2, chartHeight,
+                filesystem.mountPoint() + " · " + series, "M/s", samples,
+                adaptiveMaximum(samples, overlayWidth - 2, 0.1, 0),
+                seriesColor, cursor, null, Theme.BRAILLE);
+        int detailY = chartY + chartHeight + 1;
+        if (cursor >= 0 && cursor < samples.length) {
             String readout = "▸ " + filesystem.mountPoint()
-                    + "  read " + mibRate(mibAt(filesystem.readHistory().samples(range), cursor))
-                    + "  write " + mibRate(mibAt(filesystem.writeHistory().samples(range), cursor));
+                    + "  " + series + " " + mibRate(mibAt(samples, cursor));
             Theme.put(graphics, innerX, detailY, innerW, readout, Theme.ACCENT);
             detailY++;
         }
@@ -394,76 +417,46 @@ public final class DashboardOverviewRenderer {
                     filesystemSummary(filesystem), Theme.INK_SECONDARY);
         }
         Theme.put(graphics, innerX, y + overlayHeight - 1, innerW,
-                "↑↓ filesystem   ←/→ cursor   [ ] range   e explain   Esc close", Theme.INK_MUTED);
+                footerHint(innerW,
+                        "←/→ drill-in   ↑↓ read/write   h/l cursor   [ ] range   e explain   Esc close",
+                        "←/→ drill  ↑↓ I/O  h/l cur  Esc"),
+                Theme.INK_MUTED);
     }
 
-    private static void drawFilesystemGrid(TextGraphics graphics, int x, int y, int width, int height,
-            List<FilesystemSeries> filesystems, TimeSeriesBuffer.Range range,
-            int selected, int cursor) {
-        if (filesystems.isEmpty()) {
-            Theme.put(graphics, x, y, width, "no user-visible filesystems", Theme.INK_MUTED);
-            return;
+    private static String activeText(Double utilizationPercent) {
+        return utilizationPercent == null ? "n/a" : String.format("%.0f%%", utilizationPercent);
+    }
+
+    /**
+     * Scales a chart to the data it can actually display: the most recent
+     * samples that fit in the plot, never below {@code floor} and optionally
+     * capped by {@code ceiling}.
+     */
+    private static double adaptiveMaximum(double[] samples, int chartWidth,
+            double floor, double ceiling) {
+        return adaptiveMaximumOver(samples,
+                LineChart.sampleCapacity(chartWidth, Theme.BRAILLE), floor, ceiling);
+    }
+
+    /**
+     * Scales a chart to the most recent {@code visibleSamples} samples, never
+     * below {@code floor} and optionally capped by {@code ceiling}.
+     */
+    private static double adaptiveMaximumOver(double[] samples, int visibleSamples,
+            double floor, double ceiling) {
+        if (samples == null || samples.length == 0) {
+            return floor;
         }
-        int columns = width >= 160 ? 4 : width >= 80 ? 2 : 1;
-        columns = Math.min(columns, filesystems.size());
-        int rows = (filesystems.size() + columns - 1) / columns;
-        double max = filesystemAxisMaximum(filesystems, range);
-        if (height < rows * 4) {
-            drawFilesystemRows(graphics, x, y, width, height, filesystems, range, selected, max);
-            return;
-        }
-        int cellWidth = Math.max(8, width / columns);
-        int cellHeight = Math.max(4, height / rows);
-        for (int index = 0; index < filesystems.size(); index++) {
-            int column = index % columns;
-            int row = index / columns;
-            int cellX = x + column * cellWidth;
-            int cellY = y + row * cellHeight;
-            int actualWidth = column == columns - 1 ? width - column * cellWidth : cellWidth - 1;
-            int actualHeight = row == rows - 1 ? height - row * cellHeight : cellHeight - 1;
-            FilesystemSeries filesystem = filesystems.get(index);
-            double[] samples = combinedSamples(filesystem, range);
-            String title = (index == selected ? "▸ " : "  ") + filesystem.mountPoint();
-            if (actualHeight >= 6) {
-                LineChart.draw(graphics, cellX, cellY, actualWidth, actualHeight, title, "M/s",
-                        samples, max, Theme.IO_SERIES, cursor, null, false);
-            } else {
-                Panel.draw(graphics, cellX, cellY, actualWidth, actualHeight, title);
-                Sparkline.draw(graphics, cellX + 1, cellY + 1, actualWidth - 2,
-                        normalize(samples, max), Theme.IO_SERIES, false);
+        int visible = Math.min(samples.length, Math.max(1, visibleSamples));
+        double peak = 0;
+        for (int index = samples.length - visible; index < samples.length; index++) {
+            double sample = samples[index];
+            if (!Double.isNaN(sample)) {
+                peak = Math.max(peak, sample);
             }
         }
-    }
-
-    private static void drawFilesystemRows(TextGraphics graphics, int x, int y, int width, int height,
-            List<FilesystemSeries> filesystems, TimeSeriesBuffer.Range range,
-            int selected, double max) {
-        int labelWidth = Math.min(20, Math.max(8, width / 3));
-        int visible = Math.min(filesystems.size(), Math.max(1, height));
-        int start = Math.max(0, Math.min(selected - visible + 1, filesystems.size() - visible));
-        for (int row = 0; row < visible; row++) {
-            int index = start + row;
-            FilesystemSeries filesystem = filesystems.get(index);
-            String title = (index == selected ? "▸ " : "  ") + filesystem.mountPoint();
-            Theme.put(graphics, x, y + row, labelWidth,
-                    Theme.clipToWidth(title, labelWidth),
-                    index == selected ? Theme.ACCENT : Theme.INK_SECONDARY);
-            Sparkline.draw(graphics, x + labelWidth, y + row, Math.max(1, width - labelWidth),
-                    normalize(combinedSamples(filesystem, range), max), Theme.IO_SERIES, false);
-        }
-    }
-
-    private static double filesystemAxisMaximum(List<FilesystemSeries> filesystems,
-            TimeSeriesBuffer.Range range) {
-        double peak = 1;
-        for (FilesystemSeries filesystem : filesystems) {
-            for (double sample : combinedSamples(filesystem, range)) {
-                if (!Double.isNaN(sample)) {
-                    peak = Math.max(peak, sample);
-                }
-            }
-        }
-        return niceCeiling(peak * 1.1);
+        double maximum = Math.max(floor, niceCeiling(peak * 1.1));
+        return ceiling > 0 ? Math.min(ceiling, maximum) : maximum;
     }
 
     private static double[] combinedSamples(FilesystemSeries filesystem,
@@ -489,7 +482,7 @@ public final class DashboardOverviewRenderer {
     }
 
     private static double[] normalize(double[] samples, double max) {
-        double safeMax = Math.max(1, max);
+        double safeMax = max > 0 ? max : 1;
         double[] normalized = new double[samples.length];
         for (int index = 0; index < samples.length; index++) {
             normalized[index] = Double.isNaN(samples[index])
@@ -597,8 +590,8 @@ public final class DashboardOverviewRenderer {
             String title = "Core " + index + (index == selectedCore ? " *" : "");
             if (actualHeight >= 6) {
                 LineChart.draw(graphics, cellX, cellY, actualWidth, actualHeight, title, "%",
-                        samples, 100, Theme.CPU_SERIES, cursor,
-                        null, false);
+                        samples, axisMaximum(0, samples, actualWidth), Theme.CPU_SERIES, cursor,
+                        null, Theme.BRAILLE);
             } else {
                 Panel.draw(graphics, cellX, cellY, actualWidth, actualHeight, title);
                 Sparkline.draw(graphics, cellX + 1, cellY + 1, actualWidth - 2,
@@ -632,24 +625,18 @@ public final class DashboardOverviewRenderer {
         return String.format("%.1f%%", value);
     }
 
-    private static double axisMaximum(int card, double[] samples, TimeSeriesBuffer history,
-            TimeSeriesBuffer.Range range) {
-        if (card == 0 || card == 1 || card == 3)
-            return 100;
-        double peak = history == null ? Double.NaN : history.peak(range);
-        if (Double.isNaN(peak)) {
-            peak = 1;
-            for (double sample : samples)
-                if (!Double.isNaN(sample))
-                    peak = Math.max(peak, sample);
-        }
-        return niceCeiling(peak * 1.1);
+    private static double axisMaximum(int card, double[] samples, int chartWidth) {
+        return switch (card) {
+            case 0, 1, 3 -> adaptiveMaximum(samples, chartWidth, 10, 100);
+            case 2 -> adaptiveMaximum(samples, chartWidth, 10, 0);
+            default -> adaptiveMaximum(samples, chartWidth, 0.1, 0);
+        };
     }
 
     private static double niceCeiling(double target) {
-        double safeTarget = Math.max(1, target);
+        double safeTarget = Math.max(1e-9, target);
         double scale = Math.pow(10, Math.floor(Math.log10(safeTarget)));
-        for (double step : new double[]{1, 2, 5, 10})
+        for (double step : new double[]{1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10})
             if (step * scale >= safeTarget)
                 return step * scale;
         return 10 * scale;
@@ -731,9 +718,11 @@ public final class DashboardOverviewRenderer {
         if (error != null) {
             Theme.put(graphics, 2, chartY + 2, width - 4, error, Theme.CRITICAL);
         } else {
+            double[] samples = cpuHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
             LineChart.draw(graphics, 1, chartY + 1, width - 2, chartHeight - 2,
-                    "CPU / RAM", "%", cpuHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES),
-                    100, Theme.CPU_SERIES, -1, cpuHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), false);
+                    "CPU / RAM", "%", samples, axisMaximum(0, samples, width - 2),
+                    Theme.CPU_SERIES, -1,
+                    cpuHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), Theme.BRAILLE);
         }
     }
 
@@ -762,7 +751,6 @@ public final class DashboardOverviewRenderer {
         int columns = cardColumns(width, cards.size());
         int gap = 1;
         int cardWidth = (width - (columns - 1) * gap) / columns;
-        double filesystemMax = filesystemAxisMaximum(filesystems, TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
         for (int index = 0; index < cards.size(); index++) {
             int row = index / columns;
             int column = index % columns;
@@ -770,7 +758,7 @@ public final class DashboardOverviewRenderer {
             int cardY = y + row * CARD_STRIDE;
             drawCard(graphics, cards.get(index), x, cardY, cardWidth, snapshot,
                     cpuHistory, memoryHistory, temperatureHistory, gpuHistory, diskIoHistory,
-                    filesystems, filesystemMax, index == selectedCard);
+                    filesystems, index == selectedCard);
         }
     }
 
@@ -778,7 +766,7 @@ public final class DashboardOverviewRenderer {
             DashboardSnapshot snapshot, TimeSeriesBuffer cpuHistory, TimeSeriesBuffer memoryHistory,
             TimeSeriesBuffer temperatureHistory, TimeSeriesBuffer gpuHistory,
             TimeSeriesBuffer diskIoHistory, List<FilesystemSeries> filesystems,
-            double filesystemMax, boolean selected) {
+            boolean selected) {
         TimeSeriesBuffer.Range fifteenMinutes = TimeSeriesBuffer.Range.FIFTEEN_MINUTES;
         String label = card.label();
         String value;
@@ -791,7 +779,8 @@ public final class DashboardOverviewRenderer {
                 CpuSnapshot cpu = snapshot == null ? null : snapshot.cpu();
                 value = percent(cpu == null ? null : cpu.totalUsagePercent());
                 valueColor = Theme.utilizationColor(cpu == null ? null : cpu.totalUsagePercent());
-                history = cpuHistory.samples(fifteenMinutes);
+                double[] samples = cpuHistory.samples(fifteenMinutes);
+                history = normalize(samples, adaptiveMaximumOver(samples, width, 10, 100));
                 caption = "current";
                 sparkColor = Theme.CPU_SERIES;
             }
@@ -800,7 +789,8 @@ public final class DashboardOverviewRenderer {
                         : ratio(snapshot.memory().usedBytes(), snapshot.memory().totalBytes());
                 value = percent(used);
                 valueColor = Theme.utilizationColor(used);
-                history = memoryHistory.samples(fifteenMinutes);
+                double[] samples = memoryHistory.samples(fifteenMinutes);
+                history = normalize(samples, adaptiveMaximumOver(samples, width, 10, 100));
                 caption = "current";
                 sparkColor = Theme.MEMORY_SERIES;
             }
@@ -809,7 +799,8 @@ public final class DashboardOverviewRenderer {
                 Double temperature = cpu == null ? null : cpu.temperatureCelsius();
                 value = temperature(temperature);
                 valueColor = Theme.temperatureColor(temperature);
-                history = temperatureHistory.samples(fifteenMinutes);
+                double[] samples = temperatureHistory.samples(fifteenMinutes);
+                history = normalize(samples, adaptiveMaximumOver(samples, width, 10, 0));
                 caption = "current";
                 sparkColor = Theme.INK_SECONDARY;
             }
@@ -818,7 +809,8 @@ public final class DashboardOverviewRenderer {
                 Double utilization = gpu == null ? null : gpu.utilizationPercent();
                 value = percent(utilization);
                 valueColor = Theme.utilizationColor(utilization);
-                history = gpuHistory.samples(fifteenMinutes);
+                double[] samples = gpuHistory.samples(fifteenMinutes);
+                history = normalize(samples, adaptiveMaximumOver(samples, width, 10, 100));
                 caption = "latest sample";
                 sparkColor = Theme.INK_SECONDARY;
             }
@@ -827,8 +819,9 @@ public final class DashboardOverviewRenderer {
                 Double combined = filesystem == null ? null : combinedMib(filesystem);
                 value = combined == null ? "n/a" : mibRate(combined);
                 valueColor = Theme.INK;
-                history = filesystem == null ? new double[0]
-                        : normalize(combinedSamples(filesystem, fifteenMinutes), filesystemMax);
+                double[] samples = filesystem == null
+                        ? new double[0] : combinedSamples(filesystem, fifteenMinutes);
+                history = normalize(samples, adaptiveMaximumOver(samples, width, 0.1, 0));
                 caption = filesystem == null ? "n/a"
                         : "R " + mibShort(filesystem.readBytesPerSecond())
                         + " W " + mibShort(filesystem.writeBytesPerSecond()) + " M/s";
@@ -838,8 +831,8 @@ public final class DashboardOverviewRenderer {
                 Double total = totalFilesystemIo(snapshot == null ? null : snapshot.disk());
                 value = total == null ? "n/a" : rate(total);
                 valueColor = Theme.INK;
-                history = normalize(diskIoHistory.samples(fifteenMinutes),
-                        historyMaximum(diskIoHistory, fifteenMinutes));
+                double[] samples = diskIoHistory.samples(fifteenMinutes);
+                history = normalize(samples, adaptiveMaximumOver(samples, width, 0.1, 0));
                 caption = "latest sample";
                 sparkColor = Theme.IO_SERIES;
             }
@@ -866,17 +859,21 @@ public final class DashboardOverviewRenderer {
         if (error != null) {
             Theme.put(graphics, x + 2, y + 2, width - 4, error, Theme.CRITICAL);
         } else {
+            double[] samples = cpuHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
             LineChart.draw(graphics, x + 1, y + 1, width - 2, firstHeight - 2, "CPU", "%",
-                    cpuHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), 100,
-                    Theme.CPU_SERIES, -1, cpuHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), false);
+                    samples, axisMaximum(0, samples, width - 2),
+                    Theme.CPU_SERIES, -1,
+                    cpuHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), Theme.BRAILLE);
         }
         int secondY = y + firstHeight + 1;
         int secondHeight = height - firstHeight - 1;
         if (secondHeight >= 4) {
             Panel.draw(graphics, x, secondY, width, secondHeight, "RAM • 15M");
+            double[] samples = memoryHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES);
             LineChart.draw(graphics, x + 1, secondY + 1, width - 2, secondHeight - 2, "RAM", "%",
-                    memoryHistory.samples(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), 100,
-                    Theme.MEMORY_SERIES, -1, memoryHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), false);
+                    samples, axisMaximum(1, samples, width - 2),
+                    Theme.MEMORY_SERIES, -1,
+                    memoryHistory.coverageNote(TimeSeriesBuffer.Range.FIFTEEN_MINUTES), Theme.BRAILLE);
         }
     }
 
@@ -963,11 +960,6 @@ public final class DashboardOverviewRenderer {
             return null;
         }
         return (read == null ? 0 : read) + (write == null ? 0 : write);
-    }
-
-    private static double historyMaximum(TimeSeriesBuffer history, TimeSeriesBuffer.Range range) {
-        double peak = history.peak(range);
-        return Double.isNaN(peak) ? 100 : niceCeiling(peak * 1.1);
     }
 
     private static String percent(Double value) {
