@@ -48,6 +48,31 @@ class StatCardTest {
     }
 
     @Test
+    void sparklineSitsBesideTheValueNotOnTheTitleRow() throws Exception {
+        var term = new DefaultVirtualTerminal(new TerminalSize(24, 5));
+        try (var screen = new TerminalScreen(term)) {
+            screen.startScreen();
+            StatCard.draw(screen.newTextGraphics(), 0, 0, 24, 5,
+                    "CPU", "42%", Theme.INK,
+                    new double[]{10, 20, 30, 40, 50}, "current", true);
+            screen.refresh();
+
+            assertFalse(hasSparkline(term, 1), "the title row must not contain the sparkline");
+            assertTrue(hasSparkline(term, 2), "the sparkline belongs next to the value");
+        }
+    }
+
+    private static boolean hasSparkline(DefaultVirtualTerminal terminal, int row) {
+        for (int column = 0; column < terminal.getTerminalSize().getColumns(); column++) {
+            char character = terminal.getCharacter(column, row).getCharacter();
+            if (character >= '▁' && character <= '█') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Test
     void buildSparklineAllSame() {
         double[] h = {50, 50, 50};
         String s = StatCard.buildSparkline(h, 3);

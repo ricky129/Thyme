@@ -10,6 +10,7 @@ import com.googlecode.lanterna.screen.TerminalScreen;
 import com.googlecode.lanterna.terminal.virtual.DefaultVirtualTerminal;
 import com.ricky.thyme.feature.cpu.CpuSnapshot;
 import com.ricky.thyme.feature.disk.DiskSnapshot;
+import com.ricky.thyme.feature.host.HostSnapshot;
 import com.ricky.thyme.feature.memory.MemorySnapshot;
 import com.ricky.thyme.feature.telemetry.EventLogBuffer;
 import com.ricky.thyme.feature.telemetry.TimeSeriesBuffer;
@@ -48,7 +49,17 @@ class UiSnapshotTest {
                             temperature, gpu, disk, events, null, 0, true,
                             TimeSeriesBuffer.Range.FIFTEEN_MINUTES, 899, false, true));
         }
-        assertTrue(Files.exists(Path.of("target", "ui-snapshots", "overview-120x35.txt")));
+        Path overview = Path.of("target", "ui-snapshots", "overview-120x35.txt");
+        assertTrue(Files.exists(overview));
+        String overviewText = Files.readString(overview);
+        assertTrue(overviewText.contains("myserver"), "header must show the hostname");
+        assertTrue(overviewText.contains("up 12d 4h"), "header must show the uptime");
+        assertTrue(overviewText.contains("-15m") && overviewText.contains("now"),
+                "charts must label the x axis with time");
+        assertTrue(overviewText.contains("● total"), "the chart needs a legend row");
+        String detailText = Files.readString(Path.of("target", "ui-snapshots", "detail-120x35.txt"));
+        assertTrue(detailText.contains("-15m") && detailText.contains("now"));
+        assertTrue(detailText.contains("● total"));
     }
 
     @Test
@@ -190,7 +201,12 @@ class UiSnapshotTest {
                 List.of(new CpuSnapshot.Core(0, 42.0, 2_000_000_000L)));
         return new DashboardSnapshot(Instant.parse("2026-01-01T12:00:00Z"), cpu,
                 new MemorySnapshot(68L * 1024 * 1024 * 1024, 16L * 1024 * 1024 * 1024,
-                        1L * 1024 * 1024 * 1024, 0), null, null, List.of(), Map.of());
+                        1L * 1024 * 1024 * 1024, 0), null, null, List.of(), Map.of(),
+                host());
+    }
+
+    private static HostSnapshot host() {
+        return new HostSnapshot("myserver", 12L * 86400 + 4 * 3600);
     }
 
     private static DashboardSnapshot snapshotWithFilesystems() {
@@ -206,7 +222,7 @@ class UiSnapshotTest {
                 List.of(new CpuSnapshot.Core(0, 42.0, 2_000_000_000L)));
         return new DashboardSnapshot(Instant.parse("2026-01-01T12:00:00Z"), cpu,
                 new MemorySnapshot(68L * 1024 * 1024 * 1024, 16L * 1024 * 1024 * 1024,
-                        1L * 1024 * 1024 * 1024, 0), null, disk, List.of(), Map.of());
+                        1L * 1024 * 1024 * 1024, 0), null, disk, List.of(), Map.of(), host());
     }
 
     private static DiskSnapshot.Filesystem filesystem(String mountPoint, String type, String source,
@@ -248,7 +264,7 @@ class UiSnapshotTest {
                         new CpuSnapshot.Core(3, 40.0, 2_000_000_000L)));
         return new DashboardSnapshot(Instant.parse("2026-01-01T12:00:00Z"), cpu,
                 new MemorySnapshot(68L * 1024 * 1024 * 1024, 16L * 1024 * 1024 * 1024,
-                        1L * 1024 * 1024 * 1024, 0), null, null, List.of(), Map.of());
+                        1L * 1024 * 1024 * 1024, 0), null, null, List.of(), Map.of(), host());
     }
 
     private static TimeSeriesBuffer history(double value, int count) {

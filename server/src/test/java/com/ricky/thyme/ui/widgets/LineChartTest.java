@@ -86,8 +86,29 @@ class LineChartTest {
                     samples, 100, Theme.CPU_SERIES, samples.length - 1, null, true);
             screen.refresh();
 
-            assertEquals('│',
+            assertEquals('●',
+                    terminal[0].getCharacter(CHART_X + CHART_W - 1, CHART_Y).getCharacter());
+            assertEquals('┆',
                     terminal[0].getCharacter(CHART_X + CHART_W - 1, CHART_Y + 2).getCharacter());
+        }
+    }
+
+    @Test
+    void xAxisDrawsTimeLabelsBelowThePlot() throws Exception {
+        var terminal = new DefaultVirtualTerminal[1];
+        try (TerminalScreen screen = screen(40, 12, terminal)) {
+            LineChart.draw(screen.newTextGraphics(), 0, 0, 40, 12, "CPU", "%",
+                    ramp(40), 100, Theme.CPU_SERIES, -1, null,
+                    new String[]{"-15m", "-10m", "-5m", "now"}, true);
+            screen.refresh();
+
+            StringBuilder bottom = new StringBuilder();
+            for (int col = 0; col < 40; col++) {
+                bottom.append(terminal[0].getCharacter(col, 11).getCharacter());
+            }
+            String labels = bottom.toString();
+            assertTrue(labels.contains("-15m"));
+            assertTrue(labels.contains("now"));
         }
     }
 
@@ -104,7 +125,8 @@ class LineChartTest {
 
             for (int row = 0; row < 12; row++) {
                 for (int col = 0; col < 40; col++) {
-                    assertFalse(terminal[0].getCharacter(col, row).getCharacter() == '│',
+                    char character = terminal[0].getCharacter(col, row).getCharacter();
+                    assertFalse(character == '┆' || character == '●',
                             "a hidden cursor must not draw a crosshair");
                 }
             }
