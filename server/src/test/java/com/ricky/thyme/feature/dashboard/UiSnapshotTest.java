@@ -55,18 +55,21 @@ class UiSnapshotTest {
         assertTrue(overviewText.contains("myserver"), "header must show the hostname");
         assertTrue(overviewText.contains("up 12d 4h"), "header must show the uptime");
         assertTrue(overviewText.contains("CPU") && overviewText.contains("RAM")
-                && overviewText.contains("Temp") && overviewText.contains("GPU")
+                && overviewText.contains("Network") && overviewText.contains("GPU")
                 && overviewText.contains("Disk I/O"),
                 "home collage must show all five metric panels");
         assertTrue(overviewText.contains("Failed events"),
                 "wide home view must keep the failed events sidebar");
         assertTrue(overviewText.contains("-15m") && overviewText.contains("now"),
                 "charts must label the x axis with time");
+        assertTrue(overviewText.contains("54°C"), "CPU tile must show the temperature");
+        assertFalse(overviewText.contains("Temp ·"), "no standalone temperature tile");
         assertFalse(overviewText.contains("Core 0"),
                 "home collage must show total CPU only, not per-core charts");
         String detailText = Files.readString(Path.of("target", "ui-snapshots", "detail-120x35.txt"));
         assertTrue(detailText.contains("-15m") && detailText.contains("now"));
         assertTrue(detailText.contains("● total"));
+        assertTrue(detailText.contains("Temp  54°C"), "CPU drill-in must show the temperature");
     }
 
     @Test
@@ -91,6 +94,7 @@ class UiSnapshotTest {
                 .count());
         assertTrue(content.contains("Core 0 ▸ cursor"));
         assertTrue(content.contains("Core 2 * ▸ cursor"));
+        assertTrue(content.contains("Temp  54°C"));
     }
 
     @Test
@@ -179,21 +183,74 @@ class UiSnapshotTest {
         String overview = Files.readString(
                 Path.of("target", "ui-snapshots", "filesystem-overview-120x35.txt"));
         assertTrue(overview.contains("Disk /"));
-        assertFalse(overview.contains("/home"));
-        assertFalse(overview.contains("/media/usb"));
+        assertTrue(overview.contains("Disk /home"));
+        assertTrue(overview.contains("+1 more"));
         String detail = Files.readString(
                 Path.of("target", "ui-snapshots", "disk-detail-120x35.txt"));
-        assertTrue(detail.contains("Disk I/O"));
-        assertTrue(detail.contains("(2/3)"));
-        assertTrue(detail.contains("/home"));
+        assertTrue(detail.contains("Disk I/O  ·  /  ·  Esc close"));
         assertTrue(detail.contains("I/O: [Read] Write (Tab)"));
-        assertTrue(detail.contains("Disk: / [/home] /media/usb (↑↓)"));
-        assertTrue(detail.contains("8M/s"),
-                "the axis must scale to the visible samples instead of a fixed range");
+        assertFalse(detail.contains("(↑↓)"), "a single-mount drill-in has no disk selector");
         String writeDetail = Files.readString(
                 Path.of("target", "ui-snapshots", "disk-detail-write-120x35.txt"));
         assertTrue(writeDetail.contains("I/O: Read [Write] (Tab)"));
-        assertTrue(writeDetail.contains("/home · write"));
+        assertTrue(writeDetail.contains("/ · write"));
+    }
+
+    @Test
+    void writesTwoFilesystemOverviewOtherDisksAndNetworkSnapshots() throws IOException {
+        DashboardSnapshot snapshot = snapshotWithFilesystems();
+        List<FilesystemSeries> filesystems = filesystemSeries(snapshot);
+        TimeSeriesBuffer swap = history(5, 900);
+        DiskSnapshot twoDisks = new DiskSnapshot(List.of(),
+                snapshot.disk().filesystems().subList(0, 2));
+        DashboardSnapshot twoSnapshot = new DashboardSnapshot(snapshot.sampledAt(), snapshot.cpu(),
+                snapshot.memory(), null, twoDisks, List.of(), Map.of(), host());
+        for (TerminalSize size : SIZES) {
+            writeSnapshot("two-filesystems", size, (graphics, terminalSize) ->
+                    DashboardOverviewRenderer.draw(graphics, terminalSize, twoSnapshot,
+                            history(42, 900), history(68, 900), swap, history(2, 900),
+                            history(1, 900), history(12, 900), history(3.5, 900),
+                            new EventLogBuffer(), null, 0, false,
+                            TimeSeriesBuffer.Range.FIFTEEN_MINUTES, -1, false, false,
+                            List.<TimeSeriesBuffer>of(), 0, new int[0], filesystems, false,
+                            false, "", -1));
+            writeSnapshot("many-filesystems", size, (graphics, terminalSize) ->
+                    DashboardOverviewRenderer.draw(graphics, terminalSize, snapshot,
+                            history(42, 900), history(68, 900), swap, history(2, 900),
+                            history(1, 900), history(12, 900), history(3.5, 900),
+                            new EventLogBuffer(), null, 6, false,
+                            TimeSeriesBuffer.Range.FIFTEEN_MINUTES, -1, false, false,
+                            List.<TimeSeriesBuffer>of(), 0, new int[0], filesystems, false,
+                            false, "", -1));
+        }
+        TerminalSize wide = new TerminalSize(120, 35);
+        writeSnapshot("other-disks-detail", wide, (graphics, terminalSize) ->
+                DashboardOverviewRenderer.draw(graphics, terminalSize, snapshot,
+                        history(42, 900), history(68, 900), swap, history(2, 900),
+                        history(1, 900), history(12, 900), history(3.5, 900),
+                        new EventLogBuffer(), null, 6, true,
+                        TimeSeriesBuffer.Range.FIFTEEN_MINUTES, 898, false, true,
+                        List.<TimeSeriesBuffer>of(), 0, new int[0], filesystems, false,
+                        false, "", 0));
+        writeSnapshot("network-detail", wide, (graphics, terminalSize) ->
+                DashboardOverviewRenderer.draw(graphics, terminalSize, snapshot,
+                        history(42, 900), history(68, 900), swap, history(2, 900),
+                        history(1, 900), history(12, 900), history(3.5, 900),
+                        new EventLogBuffer(), null, 2, true,
+                        TimeSeriesBuffer.Range.FIFTEEN_MINUTES, 898, false, true,
+                        List.<TimeSeriesBuffer>of(), 0, new int[0], filesystems, false,
+                        false, "", -1));
+
+        String two = Files.readString(Path.of("target", "ui-snapshots", "two-filesystems-120x35.txt"));
+        assertTrue(two.contains("Disk /") && two.contains("Disk /home"));
+        assertFalse(two.contains("more ›"));
+        String many = Files.readString(Path.of("target", "ui-snapshots", "many-filesystems-120x35.txt"));
+        assertTrue(many.contains("+1 more"));
+        String other = Files.readString(Path.of("target", "ui-snapshots", "other-disks-detail-120x35.txt"));
+        assertTrue(other.contains("Other disks  ·  /media/usb"));
+        String network = Files.readString(Path.of("target", "ui-snapshots", "network-detail-120x35.txt"));
+        assertTrue(network.contains("Down  ") && network.contains("Up  "));
+        assertTrue(network.contains("● down   ○ up"));
     }
 
     @Test

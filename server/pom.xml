@@ -80,9 +80,10 @@
               </modulePath>
               <modules>
                 <module>com.ricky.thyme.server</module>
+                <module>jdk.crypto.ec</module>
               </modules>
               <outputDirectory>${project.build.directory}/thyme-server-runtime</outputDirectory>
-              <bindServices>true</bindServices>
+              <bindServices>false</bindServices>
               <jarInclusionPolicy>NONE</jarInclusionPolicy>
               <noManPages>true</noManPages>
               <noHeaderFiles>true</noHeaderFiles>

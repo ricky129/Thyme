@@ -152,6 +152,46 @@ public final class LineChart {
         drawXAxis(g, plotX, plotY + plotH, plotW, showXLabels ? xLabels : null);
     }
 
+    /** Draws several series in a compact, border-titled collage tile. */
+    public static void drawCompactMulti(
+            TextGraphics g,
+            int x, int y, int w, int h,
+            String unit,
+            List<Series> series,
+            double maxValue,
+            String[] xLabels,
+            boolean braille) {
+        if (w < 2 || h < 1 || series == null || series.isEmpty()) return;
+
+        if (h < 4 || w < 10) {
+            for (Series value : series) {
+                drawSeries(g, x, y, w, h, value, maxValue, braille);
+            }
+            return;
+        }
+
+        int plotX = x + Y_AXIS_WIDTH;
+        int plotW = w - Y_AXIS_WIDTH;
+        boolean showXLabels = xLabels != null && xLabels.length > 0 && h >= 7;
+        int plotH = h - X_AXIS_HEIGHT - (showXLabels ? X_LABEL_HEIGHT : 0);
+        if (plotW < 2 || plotH < 1) return;
+
+        drawYAxis(g, x, y, plotH, maxValue, unit);
+        for (Series value : series) {
+            drawSeries(g, plotX, y, plotW, plotH, value, maxValue, braille);
+        }
+        drawXAxis(g, plotX, y + plotH, plotW, showXLabels ? xLabels : null);
+    }
+
+    private static void drawSeries(TextGraphics g, int x, int y, int w, int h,
+            Series value, double maxValue, boolean braille) {
+        if (value.dashed()) {
+            drawDashedLine(g, x, y, w, h, value.samples(), maxValue, value.color());
+        } else {
+            drawPlot(g, x, y, w, h, value.samples(), maxValue, value.color(), -1, braille);
+        }
+    }
+
     /**
      * Number of samples a compact border-titled chart can display.
      */

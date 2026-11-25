@@ -1,6 +1,7 @@
 package com.ricky.thyme.server;
 
 import com.ricky.thyme.exec.ProcessCommandRunner;
+import com.ricky.thyme.feature.containers.ContainerIconCache;
 import com.ricky.thyme.feature.containers.ContainerPage;
 import com.ricky.thyme.feature.containers.ContainerProvider;
 import com.ricky.thyme.feature.cpu.OshiCpuProvider;
@@ -9,6 +10,7 @@ import com.ricky.thyme.feature.disk.LinuxDiskProvider;
 import com.ricky.thyme.feature.gpu.LinuxGpuProvider;
 import com.ricky.thyme.feature.host.OshiHostProvider;
 import com.ricky.thyme.feature.memory.OshiMemoryProvider;
+import com.ricky.thyme.feature.network.LinuxNetworkProvider;
 import com.ricky.thyme.feature.services.ServiceProvider;
 import com.ricky.thyme.ui.Shell;
 import com.ricky.thyme.ui.PageRegistry;
@@ -23,6 +25,19 @@ public final class ServerMain {
     }
 
     public static void main(String[] args) {
+        if (args.length == 1 && "--sync-icons".equals(args[0])) {
+            try {
+                syncContainerIcons();
+            } catch (IOException e) {
+                System.err.println("thyme-server: could not sync container icons: " + e.getMessage());
+                System.exit(1);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                System.err.println("thyme-server: icon sync interrupted.");
+                System.exit(1);
+            }
+            return;
+        }
         if (args.length != 0) {
             System.err.println("thyme-server: this command does not accept arguments.");
             System.exit(2);
@@ -33,6 +48,11 @@ public final class ServerMain {
             System.err.println("thyme-server: could not start the dashboard: " + e.getMessage());
             System.exit(1);
         }
+    }
+
+    private static void syncContainerIcons() throws IOException, InterruptedException {
+        var provider = new ContainerProvider(new ProcessCommandRunner());
+        ContainerIconCache.defaultCache().sync(provider.list());
     }
 
     private static void runDashboard() throws IOException {
@@ -48,8 +68,9 @@ public final class ServerMain {
         var dashboard = new DashboardPage(
                 new OshiCpuProvider(),
                 new OshiMemoryProvider(),
-                gpuProvider, diskProvider, serviceProvider, new OshiHostProvider());
-        var containers = new ContainerPage(new ContainerProvider(runner));
+                gpuProvider, diskProvider, serviceProvider, new OshiHostProvider(),
+                new LinuxNetworkProvider(hostRoot));
+        var containers = new ContainerPage(new ContainerProvider(runner), ContainerIconCache.defaultCache());
         new Shell(new PageRegistry(java.util.List.of(
                 new PageRegistry.Entry("overview", dashboard),
                 new PageRegistry.Entry("containers", containers)))).run();

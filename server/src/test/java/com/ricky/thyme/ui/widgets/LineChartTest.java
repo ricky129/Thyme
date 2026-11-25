@@ -168,6 +168,42 @@ class LineChartTest {
         }
     }
 
+    @Test
+    void drawCompactMultiDrawsBothSeriesWithAndWithoutAxes() throws Exception {
+        var terminal = new DefaultVirtualTerminal[1];
+        try (TerminalScreen screen = screen(40, 10, terminal)) {
+            LineChart.drawCompactMulti(screen.newTextGraphics(), 0, 0, 38, 8, "M/s",
+                    List.of(new LineChart.Series("rx", ramp(40), Theme.NET_RX_SERIES, false),
+                            new LineChart.Series("tx", ramp(40), Theme.NET_TX_SERIES, true)),
+                    100, new String[]{"-15m", "now"}, true);
+            screen.refresh();
+            StringBuilder row7 = new StringBuilder();
+            for (int col = 0; col < 38; col++) {
+                row7.append(terminal[0].getCharacter(col, 7).getCharacter());
+            }
+            assertTrue(row7.toString().contains("-15m"));
+            assertTrue(row7.toString().contains("now"));
+        }
+
+        var mini = new DefaultVirtualTerminal[1];
+        try (TerminalScreen miniScreen = screen(21, 2, mini)) {
+            LineChart.drawCompactMulti(miniScreen.newTextGraphics(), 0, 0, 21, 2, "M/s",
+                    List.of(new LineChart.Series("rx", ramp(20), Theme.NET_RX_SERIES, false)),
+                    100, null, true);
+            miniScreen.refresh();
+            int braille = 0;
+            for (int row = 0; row < 2; row++) {
+                for (int col = 0; col < 21; col++) {
+                    char ch = mini[0].getCharacter(col, row).getCharacter();
+                    if (ch >= 0x2800 && ch <= 0x28FF) {
+                        braille++;
+                    }
+                }
+            }
+            assertTrue(braille > 0);
+        }
+    }
+
     private static TerminalScreen screen(int width, int height, DefaultVirtualTerminal[] terminal)
             throws Exception {
         terminal[0] = new DefaultVirtualTerminal(new TerminalSize(width, height));

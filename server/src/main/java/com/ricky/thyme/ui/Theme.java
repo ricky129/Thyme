@@ -95,7 +95,8 @@ public final class Theme {
     public static final TextColor IO_SERIES   = SECONDARY;
     public static final TextColor SWAP_SERIES = color(0x93, 0xc5, 0xfd, TextColor.ANSI.BLUE);
     public static final TextColor WARM        = color(0xf0, 0x90, 0x48, TextColor.ANSI.YELLOW);
-    public static final TextColor TEMP_SERIES = WARM;
+    public static final TextColor NET_RX_SERIES = color(0x2d, 0xd4, 0xbf, TextColor.ANSI.CYAN);
+    public static final TextColor NET_TX_SERIES = WARM;
     public static final TextColor ACCENT      = color(0xe0, 0xa4, 0x22, TextColor.ANSI.YELLOW_BRIGHT);
     public static final TextColor GOOD        = color(0x4d, 0xb4, 0x50, TextColor.ANSI.GREEN);
     public static final TextColor CRITICAL    = color(0xf4, 0x3f, 0x5e, TextColor.ANSI.RED_BRIGHT);

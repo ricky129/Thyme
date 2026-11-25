@@ -29,12 +29,14 @@ public final class ContainerProvider {
         if (rows.isEmpty())
             return List.of();
         List<String> inspectCommand = new ArrayList<>(List.of("docker", "inspect", "--format"));
-        inspectCommand.add("{{.Id}}|{{.RestartCount}}|{{.State.ExitCode}}");
+        inspectCommand.add("{{.Id}}|{{.RestartCount}}|{{.State.ExitCode}}"
+                + "|{{with .Config.Labels}}{{index . \"thyme.icon\"}}{{end}}"
+                + "|{{with .Config.Labels}}{{index . \"homepage.icon\"}}{{end}}");
         rows.forEach(row -> inspectCommand.add(row.id()));
         Map<String, Inspect> inspect = parseInspect(run(inspectCommand).stdout());
         return rows.stream().map(row -> {
             Stats containerStats = stats.getOrDefault(row.id(), stats.get(row.name()));
-            Inspect containerInspect = inspect.getOrDefault(row.id(), new Inspect(0, null));
+            Inspect containerInspect = inspect.getOrDefault(row.id(), new Inspect(0, null, null));
             return new ContainerSnapshot(
                     row.id(),
                     row.name(),
@@ -49,7 +51,8 @@ public final class ContainerProvider {
                     containerStats == null ? null : containerStats.memoryPercent(),
                     containerStats == null ? null : containerStats.networkIo(),
                     containerStats == null ? null : containerStats.blockIo(),
-                    containerStats == null ? null : containerStats.processCount());
+                    containerStats == null ? null : containerStats.processCount(),
+                    containerInspect.icon());
         }).toList();
     }
 
@@ -137,14 +140,18 @@ public final class ContainerProvider {
         Map<String, Inspect> values = new HashMap<>();
         for (String line : output.lines().toList()) {
             String[] parts = line.split("\\|", -1);
-            if (parts.length != 3 || !ID.matcher(parts[0]).matches())
+            if (parts.length < 3 || parts.length > 5 || !ID.matcher(parts[0]).matches())
                 throw new IOException("invalid docker inspect output");
             try {
                 int restarts = Integer.parseInt(parts[1]);
                 Integer exitCode = parts[2].isBlank() ? null : Integer.valueOf(parts[2]);
                 if (restarts < 0 || (exitCode != null && exitCode < 0))
                     throw new NumberFormatException();
-                values.put(parts[0], new Inspect(restarts, exitCode));
+                String thymeIcon = parts.length > 3 ? parts[3].strip() : "";
+                String homepageIcon = parts.length > 4 ? parts[4].strip() : "";
+                String icon = !thymeIcon.isEmpty() ? thymeIcon
+                        : !homepageIcon.isEmpty() ? homepageIcon : null;
+                values.put(parts[0], new Inspect(restarts, exitCode, icon));
             } catch (NumberFormatException e) {
                 throw new IOException("invalid docker inspect counters", e);
             }
@@ -168,5 +175,5 @@ public final class ContainerProvider {
 
     record Stats(String cpu, String memory, String memoryPercent, String networkIo, String blockIo, String processCount) {}
 
-    record Inspect(int restartCount, Integer exitCode) {}
+    record Inspect(int restartCount, Integer exitCode, String icon) {}
 }

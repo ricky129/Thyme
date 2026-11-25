@@ -6,6 +6,7 @@ import com.googlecode.lanterna.TextColor;
 import com.googlecode.lanterna.graphics.TextGraphics;
 import com.googlecode.lanterna.input.KeyStroke;
 import com.googlecode.lanterna.input.KeyType;
+import com.googlecode.lanterna.input.MouseAction;
 import com.ricky.thyme.feature.telemetry.EventLogBuffer;
 import com.ricky.thyme.feature.telemetry.MetricScheduler;
 import com.ricky.thyme.feature.telemetry.TimeSeriesBuffer;
@@ -15,7 +16,6 @@ import com.ricky.thyme.ui.widgets.Dock;
 import com.ricky.thyme.ui.widgets.Overlay;
 import com.ricky.thyme.ui.widgets.Panel;
 import com.ricky.thyme.ui.widgets.StatCard;
-import com.ricky.thyme.ui.widgets.Table;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -38,6 +38,10 @@ public final class ContainerPage extends Page {
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
 
     private final ContainerProvider provider;
+    private final ContainerIconCache iconCache;
+    private final AtomicBoolean syncingIcons = new AtomicBoolean();
+    private final AtomicReference<TerminalSize> lastRenderSize = new AtomicReference<>();
+    private final AtomicInteger scrollRow = new AtomicInteger();
     private final MetricScheduler scheduler = new MetricScheduler();
     private final EventLogBuffer eventLog = new EventLogBuffer();
     private final AtomicReference<List<ContainerSnapshot>> containers = new AtomicReference<>(List.of());
@@ -56,7 +60,12 @@ public final class ContainerPage extends Page {
     private String filterQuery = "";
 
     public ContainerPage(ContainerProvider provider) {
+        this(provider, ContainerIconCache.inMemory());
+    }
+
+    public ContainerPage(ContainerProvider provider, ContainerIconCache iconCache) {
         this.provider = provider;
+        this.iconCache = iconCache;
     }
 
     @Override
@@ -70,6 +79,10 @@ public final class ContainerPage extends Page {
         scheduler.clear();
         scheduler.register(new TimeSeriesBuffer(), Duration.ofSeconds(5), () -> {
             refresh();
+            return Double.NaN;
+        });
+        scheduler.register(new TimeSeriesBuffer(), Duration.ofSeconds(60), () -> {
+            syncIconsIfNeeded();
             return Double.NaN;
         });
         scheduler.start();
@@ -123,8 +136,8 @@ public final class ContainerPage extends Page {
             );
         }
         return List.of(
-                "  ↑/↓ or j/k    Select container in list",
-                "  Enter         Open container details & view recent logs",
+                "  ←↑↓→ / hjkl   Select container card",
+                "  Enter / Click Open container details & view recent logs",
                 "  /             Search / filter containers",
                 "  r             Refresh containers list now",
                 "  1..2 / Tab    Switch to another page"
@@ -133,6 +146,10 @@ public final class ContainerPage extends Page {
 
     @Override
     public void handleKey(KeyStroke key) {
+        if (key instanceof MouseAction mouse) {
+            handleMouse(mouse);
+            return;
+        }
         if (key.getKeyType() == KeyType.Escape) {
             if (filtering) {
                 filtering = false;
@@ -227,34 +244,91 @@ public final class ContainerPage extends Page {
         }
     }
 
-    private void handleListKey(KeyStroke key) {
-        if (key.getKeyType() == KeyType.ArrowDown) {
-            selected.updateAndGet(val -> Math.min(val + 1, Math.max(0, filteredContainers().size() - 1)));
+    private void handleMouse(MouseAction mouse) {
+        if (!mouse.isMouseDown() || mouse.getButton() != 1 || filtering || pendingAction != null) {
             return;
         }
-        if (key.getKeyType() == KeyType.ArrowUp) {
-            selected.updateAndGet(val -> Math.max(0, val - 1));
+        TerminalSize size = lastRenderSize.get();
+        if (size == null || mouse.getPosition() == null) {
             return;
         }
-        if (key.getKeyType() == KeyType.Enter) {
-            if (!filteredContainers().isEmpty()) {
-                details = true;
-                selectedLogLine.set(0);
+        int col = mouse.getPosition().getColumn();
+        int row = mouse.getPosition().getRow();
+        if (details) {
+            OverlayRect rect = computeDetailRect(size);
+            if (!rect.contains(col, row) || row == rect.y()) {
+                details = false;
                 logs.set(null);
-                loadLogs();
             }
             return;
         }
+        int hit = hitTestCard(size, filteredContainers().size(), scrollRow.get(), col, row);
+        if (hit >= 0) {
+            selected.set(hit);
+            details = true;
+            selectedLogLine.set(0);
+            logs.set(null);
+            loadLogs();
+        }
+    }
 
-        if (key.getKeyType() != KeyType.Character || key.getCharacter() == null) {
+    private int columns() {
+        TerminalSize size = lastRenderSize.get();
+        return size == null ? 2 : gridColumns(size.getColumns());
+    }
+
+    private void moveSelection(int dx, int dy) {
+        int count = filteredContainers().size();
+        int cols = columns();
+        selected.updateAndGet(value -> {
+            if (dx != 0) {
+                return Math.max(0, Math.min(Math.max(0, count - 1), value + dx));
+            }
+            if (dy < 0) {
+                return value >= cols ? value - cols : value;
+            }
+            int next = value + cols;
+            if (next < count) {
+                return next;
+            }
+            int lastRowStart = Math.max(0, (count - 1) / cols * cols);
+            return value < lastRowStart ? count - 1 : value;
+        });
+    }
+
+    private void handleListKey(KeyStroke key) {
+        switch (key.getKeyType()) {
+            case ArrowDown -> moveSelection(0, 1);
+            case ArrowUp -> moveSelection(0, -1);
+            case ArrowLeft -> moveSelection(-1, 0);
+            case ArrowRight -> moveSelection(1, 0);
+            case Enter -> {
+                if (!filteredContainers().isEmpty()) {
+                    details = true;
+                    selectedLogLine.set(0);
+                    logs.set(null);
+                    loadLogs();
+                }
+            }
+            case Character -> handleListCharacter(key);
+            default -> {
+            }
+        }
+    }
+
+    private void handleListCharacter(KeyStroke key) {
+        if (key.getCharacter() == null) {
             return;
         }
-
         char ch = Character.toLowerCase(key.getCharacter());
         if (ch == 'j') {
-            selected.updateAndGet(val -> Math.min(val + 1, Math.max(0, filteredContainers().size() - 1)));
+            moveSelection(0, 1);
         } else if (ch == 'k') {
-            selected.updateAndGet(val -> Math.max(0, val - 1));
+            moveSelection(0, -1);
+        } else if (ch == 'h') {
+            moveSelection(-1, 0);
+        } else if (ch == 'l') {
+            moveSelection(1, 0);
         } else if (ch == 'r') {
             refresh();
         } else if (ch == '/') {
@@ -350,6 +424,7 @@ public final class ContainerPage extends Page {
                         }
                     }
                     containers.set(next);
+                    syncIconsIfNeeded();
                     selected.updateAndGet(value -> Math.max(0, Math.min(value, containers.get().size() - 1)));
                     error.set(null);
                     lastSampleTime = Instant.now();
@@ -368,6 +443,27 @@ public final class ContainerPage extends Page {
         } catch (RejectedExecutionException e) {
             loading.set(false);
             error.set(message(e));
+        }
+    }
+
+    private void syncIconsIfNeeded() {
+        Executor executor = background.get();
+        if (executor == null || !iconCache.needsSync(containers.get())
+                || !syncingIcons.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            executor.execute(() -> {
+                try {
+                    if (iconCache.sync(containers.get())) {
+                        invalidate();
+                    }
+                } finally {
+                    syncingIcons.set(false);
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            syncingIcons.set(false);
         }
     }
 
@@ -463,10 +559,8 @@ public final class ContainerPage extends Page {
         int footerY = height - 1;
         drawFooter(graphics, width, footerY);
 
-        int contentY = 2;
-        int contentHeight = footerY - contentY - 1;
-
-        drawBody(graphics, width, contentY, contentHeight);
+        lastRenderSize.set(size);
+        drawBody(graphics, size);
 
         if (details) {
             drawDetailOverlay(graphics, width, height);
@@ -478,7 +572,11 @@ public final class ContainerPage extends Page {
 
     private void drawHeader(TextGraphics graphics, int width) {
         Theme.put(graphics, 1, 0, 7, "THYME", Theme.ACCENT, true);
-        Theme.put(graphics, 9, 0, Math.max(0, width - 10), "Containers", Theme.INK_SECONDARY);
+        int total = containers.get().size();
+        int shown = filteredContainers().size();
+        String title = filterQuery.isEmpty() ? "Containers · " + total
+                : "Containers · " + shown + "/" + total + " (filtered)";
+        Theme.put(graphics, 9, 0, Math.max(0, width - 10), title, Theme.INK_SECONDARY);
 
         String currentErr = error.get();
         String healthStatus = currentErr == null ? "● running" : "● error";
@@ -517,7 +615,7 @@ public final class ContainerPage extends Page {
         } else if (!filterQuery.isEmpty()) {
             hints = "Filter: " + filterQuery + "   (/ edit · Esc clear)   ↑↓ select  Enter details";
         } else {
-            hints = "↑↓ select  Enter details  / filter  r refresh  q quit";
+            hints = "←↑↓→ select  Click/Enter details  / filter  r refresh  q quit";
         }
         int hintsX = Math.max(1, width - hints.length() - 1);
         if (hintsX > 25) {
@@ -526,7 +624,98 @@ public final class ContainerPage extends Page {
         }
     }
 
-    private void drawBody(TextGraphics graphics, int width, int y, int height) {
+    /** Bounds of one container card in terminal coordinates. */
+    record CardRect(int containerIndex, int x, int y, int width, int height) {
+        boolean contains(int col, int row) {
+            return col >= x && col < x + width && row >= y && row < y + height;
+        }
+    }
+
+    /** Bounds of the detail overlay. */
+    record OverlayRect(int x, int y, int width, int height) {
+        boolean contains(int col, int row) {
+            return col >= x && col < x + width && row >= y && row < y + height;
+        }
+    }
+
+    private static final int CARD_HEIGHT = 5;
+    private static final int COLUMN_GAP = 1;
+
+    static int gridColumns(int width) {
+        if (width < 78) {
+            return 2;
+        }
+        if (width < 112) {
+            return 3;
+        }
+        return width < 160 ? 4 : 5;
+    }
+
+    private static boolean showsKpis(TerminalSize size) {
+        return size.getRows() - 4 >= 14 && size.getColumns() >= 60;
+    }
+
+    private static int gridY(TerminalSize size) {
+        return showsKpis(size) ? 7 : 2;
+    }
+
+    private static int gridHeight(TerminalSize size) {
+        return size.getRows() - 1 - gridY(size);
+    }
+
+    private static int rowGap(TerminalSize size) {
+        return gridHeight(size) >= 18 ? 1 : 0;
+    }
+
+    static int visibleRows(TerminalSize size) {
+        int gap = rowGap(size);
+        return Math.max(1, (gridHeight(size) + gap) / (CARD_HEIGHT + gap));
+    }
+
+    static List<CardRect> computeCards(TerminalSize size, int containerCount, int scrollRow) {
+        if (size == null || size.getColumns() < 48 || size.getRows() < 15) {
+            return List.of();
+        }
+        int width = size.getColumns();
+        int cols = gridColumns(width);
+        int gap = rowGap(size);
+        int baseWidth = (width - COLUMN_GAP * (cols - 1)) / cols;
+        int first = scrollRow * cols;
+        int last = Math.min(containerCount, (scrollRow + visibleRows(size)) * cols);
+        List<CardRect> cards = new ArrayList<>();
+        for (int index = first; index < last; index++) {
+            int column = index % cols;
+            int x = column * (baseWidth + COLUMN_GAP);
+            int w = column == cols - 1 ? width - x : baseWidth;
+            int y = gridY(size) + (index / cols - scrollRow) * (CARD_HEIGHT + gap);
+            cards.add(new CardRect(index, x, y, w, CARD_HEIGHT));
+        }
+        return List.copyOf(cards);
+    }
+
+    static int hitTestCard(TerminalSize size, int containerCount, int scrollRow, int col, int row) {
+        for (CardRect card : computeCards(size, containerCount, scrollRow)) {
+            if (card.contains(col, row)) {
+                return card.containerIndex();
+            }
+        }
+        return -1;
+    }
+
+    static OverlayRect computeDetailRect(TerminalSize size) {
+        int termW = size.getColumns();
+        int termH = size.getRows();
+        boolean fullWidth = termW < 100;
+        int ow = fullWidth ? termW : Math.max(50, Math.min(termW - 4, (int) Math.round(termW * 0.85)));
+        int oh = Math.max(11, Math.min(termH - 1, (int) Math.round(termH * 0.90)));
+        int ox = fullWidth ? 0 : (termW - ow) / 2;
+        int oy = Math.max(2, (termH - oh) / 2 + 1);
+        return new OverlayRect(ox, oy, ow, oh);
+    }
+
+    private void drawBody(TextGraphics graphics, TerminalSize size) {
+        int width = size.getColumns();
+        int y = 2;
         List<ContainerSnapshot> all = containers.get();
         List<ContainerSnapshot> list = filteredContainers();
         long total = all.size();
@@ -534,11 +723,7 @@ public final class ContainerPage extends Page {
         long stopped = total - running;
         long restarts = all.stream().mapToInt(ContainerSnapshot::restartCount).sum();
 
-        boolean showKpis = height >= 14 && width >= 60;
-        int tableY = y;
-        int tableHeight = height;
-
-        if (showKpis) {
+        if (showsKpis(size)) {
             int kpiH = 4;
             int numCards = 4;
             int cardW = Math.max(12, (width - (numCards - 1)) / numCards);
@@ -556,86 +741,83 @@ public final class ContainerPage extends Page {
             int lastW = Math.max(12, width - kpiX);
             StatCard.draw(graphics, kpiX, y, lastW, kpiH, "Restarts", String.valueOf(restarts),
                     restarts > 0 ? Theme.CRITICAL : Theme.INK_MUTED, new double[0], "all time", false);
-
-            tableY = y + kpiH + 1;
-            tableHeight = height - kpiH - 1;
         }
 
-        Panel.draw(graphics, 0, tableY, width, tableHeight,
-                filterQuery.isEmpty() ? "Containers · " + total : "Containers · " + list.size() + "/" + total + " (filtered)");
-
+        int gridY = gridY(size);
         String currentErr = error.get();
-        if (currentErr != null) {
-            Theme.put(graphics, 2, tableY + 2, width - 4, "Docker unavailable: " + currentErr, Theme.CRITICAL);
-            return;
-        }
-        if (list.isEmpty()) {
-            String emptyMsg = filterQuery.isEmpty()
-                    ? "No containers found. " + message.get()
-                    : "No containers match '" + filterQuery + "'. Press Esc to clear filter.";
-            Theme.put(graphics, 2, tableY + 2, width - 4, emptyMsg, Theme.INK_MUTED);
-            return;
-        }
-
-        int innerX = 2;
-        int innerY = tableY + 1;
-        int innerW = width - 4;
-        int innerH = tableHeight - 2;
-
-        if (innerH < 2 || innerW < 10) {
-            return;
-        }
-
-        String[] headers;
-        int[] colWidths;
-        if (innerW >= 120) {
-            headers = new String[]{"NAME", "IMAGE", "STATE", "STATUS", "CPU", "MEM", "NET I/O", "RESTARTS"};
-            colWidths = new int[]{22, 22, 10, 18, 10, 14, 14, 8};
-        } else if (innerW >= 80) {
-            headers = new String[]{"NAME", "STATE", "STATUS", "CPU", "MEM", "RESTARTS"};
-            colWidths = new int[]{20, 10, 18, 10, 12, 8};
-        } else {
-            headers = new String[]{"NAME", "STATE", "STATUS", "CPU"};
-            colWidths = new int[]{16, 8, 14, 8};
-        }
-
-        List<String[]> rows = new ArrayList<>(list.size());
-        for (ContainerSnapshot c : list) {
-            if (innerW >= 120) {
-                rows.add(new String[]{
-                        c.name(),
-                        c.image(),
-                        c.state(),
-                        c.status(),
-                        blank(c.cpuPercent()),
-                        blank(c.memoryUsage()),
-                        blank(c.networkIo()),
-                        String.valueOf(c.restartCount())
-                });
-            } else if (innerW >= 80) {
-                rows.add(new String[]{
-                        c.name(),
-                        c.state(),
-                        c.status(),
-                        blank(c.cpuPercent()),
-                        blank(c.memoryUsage()),
-                        String.valueOf(c.restartCount())
-                });
+        if (currentErr != null || list.isEmpty()) {
+            Panel.draw(graphics, 0, gridY, width, gridHeight(size),
+                    filterQuery.isEmpty() ? "Containers · " + total
+                    : "Containers · " + list.size() + "/" + total + " (filtered)");
+            String text;
+            TextColor color = Theme.INK_MUTED;
+            if (currentErr != null) {
+                text = "Docker unavailable: " + currentErr;
+                color = Theme.CRITICAL;
+            } else if (filterQuery.isEmpty()) {
+                text = "No containers found. " + message.get();
             } else {
-                rows.add(new String[]{
-                        c.name(),
-                        c.state(),
-                        c.status(),
-                        blank(c.cpuPercent())
-                });
+                text = "No containers match '" + filterQuery + "'. Press Esc to clear filter.";
             }
+            Theme.put(graphics, 2, gridY + 2, width - 4, text, color);
+            return;
         }
 
-        int sel = selected.get();
-        int visibleRows = Math.max(1, innerH - 2);
-        int scrollOffset = Math.max(0, Math.min(sel - visibleRows + 1, list.size() - visibleRows));
+        int cols = gridColumns(width);
+        int rowsVisible = visibleRows(size);
+        int selectedRow = selected.get() / cols;
+        int scroll = scrollRow.get();
+        if (selectedRow < scroll) {
+            scroll = selectedRow;
+        } else if (selectedRow >= scroll + rowsVisible) {
+            scroll = selectedRow - rowsVisible + 1;
+        }
+        int totalRows = (list.size() + cols - 1) / cols;
+        scroll = Math.max(0, Math.min(scroll, Math.max(0, totalRows - rowsVisible)));
+        scrollRow.set(scroll);
 
-        Table.draw(graphics, innerX, innerY, innerW, innerH, headers, rows, colWidths, sel, scrollOffset);
+        for (CardRect card : computeCards(size, list.size(), scroll)) {
+            drawContainerCard(graphics, card, list.get(card.containerIndex()),
+                    card.containerIndex() == selected.get());
+        }
+    }
+
+    private void drawContainerCard(TextGraphics graphics, CardRect card, ContainerSnapshot c,
+            boolean isSelected) {
+        graphics.setBackgroundColor(Theme.PAGE);
+        Panel.draw(graphics, card.x(), card.y(), card.width(), card.height(), null,
+                isSelected ? Theme.ACCENT : Theme.HAIRLINE);
+        int budget = card.width() - 4;
+        if (budget > 0) {
+            String title = (isSelected ? " ▸ " : " ") + c.name() + " › ";
+            Theme.put(graphics, card.x() + 2, card.y(), budget, Theme.clipToWidth(title, budget),
+                    isSelected ? Theme.ACCENT : Theme.INK_SECONDARY, true);
+        }
+        int ix = Panel.interiorX(card.x());
+        int iy = Panel.interiorY(card.y());
+        int iw = Panel.interiorW(card.width());
+        boolean isRunning = "running".equalsIgnoreCase(c.state());
+        ContainerIconCache.Icon icon = iconCache.resolve(c);
+        TextColor iconColor = icon.placeholder() ? Theme.INK_MUTED
+                : isRunning ? Theme.CPU_SERIES : Theme.WARM;
+        String[] rows = icon.rows(Theme.BRAILLE);
+        for (int row = 0; row < rows.length; row++) {
+            Theme.put(graphics, ix + 1, iy + row, 6, rows[row], iconColor);
+        }
+        int metaX = ix + 8;
+        int metaW = iw - 8;
+        if (metaW <= 0) {
+            return;
+        }
+        String state = (isRunning ? "● " : "○ ") + c.state();
+        if (c.restartCount() > 0 && state.length() + 5 <= metaW) {
+            state = state + " ↻" + c.restartCount();
+        }
+        Theme.put(graphics, metaX, iy, metaW, state, isRunning ? Theme.GOOD : Theme.WARM);
+        Theme.put(graphics, metaX, iy + 1, metaW, "CPU " + blank(c.cpuPercent()),
+                Theme.INK_SECONDARY);
+        Theme.put(graphics, metaX, iy + 2, metaW, "MEM " + blank(c.memoryUsage()),
+                Theme.INK_MUTED);
     }
 
     private void drawDetailOverlay(TextGraphics graphics, int termW, int termH) {
@@ -644,11 +826,12 @@ public final class ContainerPage extends Page {
             return;
         }
 
+        OverlayRect rect = computeDetailRect(new TerminalSize(termW, termH));
         boolean fullWidth = termW < 100;
-        int ow = fullWidth ? termW : Math.max(50, Math.min(termW - 4, (int) Math.round(termW * 0.85)));
-        int oh = Math.max(11, Math.min(termH - 1, (int) Math.round(termH * 0.90)));
-        int ox = fullWidth ? 0 : (termW - ow) / 2;
-        int oy = Math.max(2, (termH - oh) / 2 + 1);
+        int ow = rect.width();
+        int oh = rect.height();
+        int ox = rect.x();
+        int oy = rect.y();
 
         graphics.setBackgroundColor(Theme.SURFACE);
         int fillHeight = fullWidth ? termH - oy : oh;
@@ -660,11 +843,21 @@ public final class ContainerPage extends Page {
         int iy = oy + 2;
         int iw = ow - 4;
 
-        Theme.put(graphics, ix, iy, iw, "Image: " + c.image(), Theme.INK_SECONDARY);
+        boolean showIcon = ow >= 60;
+        int headW = showIcon ? iw - 8 : iw;
+        if (showIcon) {
+            ContainerIconCache.Icon icon = iconCache.resolve(c);
+            String[] iconRows = icon.rows(Theme.BRAILLE);
+            for (int row = 0; row < iconRows.length; row++) {
+                Theme.put(graphics, ox + ow - 9, iy + row, 6, iconRows[row],
+                        icon.placeholder() ? Theme.INK_MUTED : Theme.CPU_SERIES);
+            }
+        }
+        Theme.put(graphics, ix, iy, headW, "Image: " + c.image(), Theme.INK_SECONDARY);
         iy++;
-        Theme.put(graphics, ix, iy, iw, "ID: " + c.id(), Theme.INK_MUTED);
+        Theme.put(graphics, ix, iy, headW, "ID: " + c.id(), Theme.INK_MUTED);
         iy++;
-        Theme.put(graphics, ix, iy, iw, "State: " + c.state() + " (" + c.status() + ")",
+        Theme.put(graphics, ix, iy, headW, "State: " + c.state() + " (" + c.status() + ")",
                 "running".equalsIgnoreCase(c.state()) ? Theme.GOOD : Theme.WARM);
         iy++;
         Theme.put(graphics, ix, iy, iw, "Uptime: " + c.runningFor() + "  •  Restarts: " + c.restartCount()

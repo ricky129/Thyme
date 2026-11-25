@@ -90,8 +90,9 @@ Paths below are relative to the repository root.
 | `server/src/main/java/com/ricky/thyme/feature/memory/` | Memory snapshot, OSHI provider, and standalone memory page. |
 | `server/src/main/java/com/ricky/thyme/feature/gpu/` | GPU provider contract, readings/snapshots, NVIDIA NVML support via OSHI, and Linux sysfs providers. |
 | `server/src/main/java/com/ricky/thyme/feature/disk/` | Disk/filesystem snapshot and Linux collection provider. |
+| `server/src/main/java/com/ricky/thyme/feature/network/` | Network snapshot and provider contract (collection logic still to be implemented). |
 | `server/src/main/java/com/ricky/thyme/feature/services/` | systemd service model, provider, and standalone page implementation. |
-| `server/src/main/java/com/ricky/thyme/feature/containers/` | Docker data model/provider and interactive container page. |
+| `server/src/main/java/com/ricky/thyme/feature/containers/` | Docker data model/provider and the card-grid container page. `SvgIconRasterizer` turns Simple Icons SVGs into 6x3 sprites; `ContainerIconCache` keeps them in `~/.cache/thyme/container-icons.json`, fills it at deploy time (`ServerMain --sync-icons`, run by `deploy.sh`) and converts icons for new containers while the page runs. |
 | `server/src/moditect/jna-platform/module-info.java` | Explicit descriptor used when staging the JNA Platform dependency for `jlink`. |
 | `server/src/test/java/` | Provider, command runner, shell, and server-entry tests. |
 

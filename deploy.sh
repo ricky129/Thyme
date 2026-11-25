@@ -93,15 +93,12 @@ if [[ ! "$REMOTE_DIR" =~ ^(~/|/)[A-Za-z0-9_./~-]*$ ]] \
 fi
 
 SSH_OPTS=()
-SCP_OPTS=()
 if [[ -n "$DEPLOY_PORT" ]]; then
     SSH_OPTS+=(-p "$DEPLOY_PORT")
-    SCP_OPTS+=(-P "$DEPLOY_PORT")
 fi
 if [[ -n "$DEPLOY_KEY" ]]; then
     DEPLOY_KEY="${DEPLOY_KEY/#\~/$HOME}"
     SSH_OPTS+=(-i "$DEPLOY_KEY")
-    SCP_OPTS+=(-i "$DEPLOY_KEY")
 fi
 
 printf '==> Target deploy: %s:%s\n' "$TARGET" "$REMOTE_DIR"
@@ -208,9 +205,8 @@ cleanup_remote_staging() {
 trap cleanup_remote_staging EXIT
 
 printf '==> Transferring the server runtime to staging...\n'
-if ! scp "${SCP_OPTS[@]}" -r \
-    "$SCRIPT_DIR/server/target/thyme-server-runtime" \
-    "$TARGET:$REMOTE_STAGING_DIR/"; then
+if ! tar -czf - -C "$SCRIPT_DIR/server/target" thyme-server-runtime \
+    | ssh "${SSH_OPTS[@]}" "$TARGET" "tar -xzf - -C \"$REMOTE_STAGING_DIR\""; then
     printf 'Error: could not transfer the server runtime to the remote staging directory.\n' >&2
     exit 1
 fi
@@ -253,6 +249,12 @@ trap - EXIT
 printf '==> Verifying the server runtime...\n'
 ssh "${SSH_OPTS[@]}" "$TARGET" \
     "test -x \"$REMOTE_RUNTIME/bin/java\""
+
+printf '==> Pre-converting icons for existing containers...\n'
+if ! ssh "${SSH_OPTS[@]}" "$TARGET" \
+    "\"$REMOTE_RUNTIME/bin/java\" --enable-native-access=com.sun.jna -m com.ricky.thyme.server/com.ricky.thyme.server.ServerMain --sync-icons"; then
+    printf 'Warning: container icon pre-conversion skipped (offline or Docker unavailable).\n' >&2
+fi
 
 printf '==> Installing the local client...\n'
 install -d "$HOME/.local/bin" "$HOME/.local/lib/thyme"

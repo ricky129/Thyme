@@ -2,6 +2,7 @@ package com.ricky.thyme.feature.dashboard;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.googlecode.lanterna.TerminalSize;
@@ -40,7 +41,9 @@ class DashboardOverviewRendererTest {
                 assertTrue(text.contains("THYME"));
                 assertTrue(text.contains("CPU"));
                 assertTrue(text.contains("RAM"));
-                assertTrue(text.contains("Temp"));
+                assertTrue(text.contains("Network"));
+                assertFalse(text.contains("Temp ·"));
+                assertTrue(text.contains("54°C"), "CPU tile must show the temperature counter");
                 assertTrue(text.contains("GPU"));
                 assertTrue(text.contains("Disk I/O"));
             }
@@ -49,31 +52,58 @@ class DashboardOverviewRendererTest {
 
     @Test
     void computesNonOverlappingCollageTilesAndHitTestingAcrossBreakpoints() {
-        for (TerminalSize size : List.of(
-                new TerminalSize(48, 15), new TerminalSize(80, 24),
-                new TerminalSize(120, 35), new TerminalSize(200, 60))) {
-            List<DashboardOverviewRenderer.TileRect> tiles = DashboardOverviewRenderer.computeTiles(size);
-            assertEquals(5, tiles.size());
-            for (int i = 0; i < tiles.size(); i++) {
-                DashboardOverviewRenderer.TileRect tile = tiles.get(i);
-                assertEquals(i, tile.cardIndex());
-                assertTrue(tile.x() >= 0 && tile.y() >= 2);
-                assertTrue(tile.x() + tile.width() <= size.getColumns());
-                assertTrue(tile.y() + tile.height() <= size.getRows() - 1);
-                assertEquals(i, DashboardOverviewRenderer.hitTestTile(size, tile.x(), tile.y()));
-                assertEquals(i, DashboardOverviewRenderer.hitTestTile(
-                        size, tile.x() + tile.width() - 1, tile.y() + tile.height() - 1));
-                for (int j = i + 1; j < tiles.size(); j++) {
-                    DashboardOverviewRenderer.TileRect other = tiles.get(j);
-                    boolean separated = tile.x() + tile.width() <= other.x()
-                            || other.x() + other.width() <= tile.x()
-                            || tile.y() + tile.height() <= other.y()
-                            || other.y() + other.height() <= tile.y();
-                    assertTrue(separated, "tiles " + i + " and " + j + " must not overlap at " + size);
+        for (int cardCount : List.of(5, 6, 7)) {
+            for (TerminalSize size : List.of(
+                    new TerminalSize(48, 15), new TerminalSize(80, 24),
+                    new TerminalSize(120, 35), new TerminalSize(200, 60))) {
+                List<DashboardOverviewRenderer.TileRect> tiles =
+                        DashboardOverviewRenderer.computeTiles(size, cardCount);
+                assertEquals(cardCount, tiles.size());
+                for (int i = 0; i < tiles.size(); i++) {
+                    DashboardOverviewRenderer.TileRect tile = tiles.get(i);
+                    assertEquals(i, tile.cardIndex());
+                    assertTrue(tile.x() >= 0 && tile.y() >= 2);
+                    assertTrue(tile.width() >= 8);
+                    assertTrue(tile.x() + tile.width() <= size.getColumns());
+                    assertTrue(tile.y() + tile.height() <= size.getRows() - 1);
+                    assertEquals(i, DashboardOverviewRenderer.hitTestTile(
+                            size, cardCount, tile.x(), tile.y()));
+                    assertEquals(i, DashboardOverviewRenderer.hitTestTile(size, cardCount,
+                            tile.x() + tile.width() - 1, tile.y() + tile.height() - 1));
+                    for (int j = i + 1; j < tiles.size(); j++) {
+                        DashboardOverviewRenderer.TileRect other = tiles.get(j);
+                        boolean separated = tile.x() + tile.width() <= other.x()
+                                || other.x() + other.width() <= tile.x()
+                                || tile.y() + tile.height() <= other.y()
+                                || other.y() + other.height() <= tile.y();
+                        assertTrue(separated, "tiles " + i + " and " + j + " must not overlap at "
+                                + size + " with " + cardCount + " cards");
+                    }
                 }
+                assertEquals(-1, DashboardOverviewRenderer.hitTestTile(size, cardCount, 0, 0));
+                assertEquals(-1, DashboardOverviewRenderer.hitTestTile(
+                        size, cardCount, 0, size.getRows() - 1));
             }
-            assertEquals(-1, DashboardOverviewRenderer.hitTestTile(size, 0, 0));
-            assertEquals(-1, DashboardOverviewRenderer.hitTestTile(size, 0, size.getRows() - 1));
+        }
+    }
+
+    @Test
+    void showsTheCpuTemperatureInBothCpuDrillInModes() throws IOException {
+        TerminalSize size = new TerminalSize(120, 35);
+        for (boolean perCore : List.of(false, true)) {
+            DefaultVirtualTerminal terminal = new DefaultVirtualTerminal(size);
+            try (Screen screen = new TerminalScreen(terminal)) {
+                screen.startScreen();
+                DashboardOverviewRenderer.draw(screen.newTextGraphics(), size, snapshot(),
+                        history(42), history(68), new TimeSeriesBuffer(), new TimeSeriesBuffer(),
+                        new TimeSeriesBuffer(), new TimeSeriesBuffer(),
+                        new EventLogBuffer(), null, 0, true,
+                        TimeSeriesBuffer.Range.FIFTEEN_MINUTES, -1, perCore, false,
+                        List.of(history(10)), 0, new int[]{-1});
+                screen.refresh();
+                assertTrue(terminalText(terminal).contains("Temp  54°C"),
+                        "per-core=" + perCore);
+            }
         }
     }
 

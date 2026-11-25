@@ -18,6 +18,8 @@ import com.ricky.thyme.feature.host.HostProvider;
 import com.ricky.thyme.feature.host.HostSnapshot;
 import com.ricky.thyme.feature.memory.MemorySnapshot;
 import com.ricky.thyme.feature.memory.OshiMemoryProvider;
+import com.ricky.thyme.feature.network.NetworkProvider;
+import com.ricky.thyme.feature.network.NetworkSnapshot;
 import com.ricky.thyme.feature.services.ServiceProvider;
 import com.ricky.thyme.feature.services.ServiceSnapshot;
 import com.ricky.thyme.feature.telemetry.EventLogBuffer;
@@ -68,11 +70,13 @@ public final class DashboardPage extends Page {
     private final DiskProvider diskProvider;
     private final ServiceProvider serviceProvider;
     private final HostProvider hostProvider;
+    private final NetworkProvider networkProvider;
     private final AtomicReference<DashboardSnapshot> snapshot = new AtomicReference<>();
     private final TimeSeriesBuffer cpuHistory = new TimeSeriesBuffer();
     private final TimeSeriesBuffer memoryHistory = new TimeSeriesBuffer();
     private final TimeSeriesBuffer swapHistory = new TimeSeriesBuffer();
-    private final TimeSeriesBuffer temperatureHistory = new TimeSeriesBuffer();
+    private final TimeSeriesBuffer networkRxHistory = new TimeSeriesBuffer();
+    private final TimeSeriesBuffer networkTxHistory = new TimeSeriesBuffer();
     private final TimeSeriesBuffer gpuHistory = new TimeSeriesBuffer();
     private final TimeSeriesBuffer diskIoHistory = new TimeSeriesBuffer();
     private final AtomicReference<List<TimeSeriesBuffer>> coreHistories
@@ -117,6 +121,19 @@ public final class DashboardPage extends Page {
             DiskProvider diskProvider,
             ServiceProvider serviceProvider,
             HostProvider hostProvider) {
+        this(cpuProvider, memoryProvider, gpuProvider, diskProvider, serviceProvider,
+                hostProvider, null);
+    }
+
+    public DashboardPage(
+            OshiCpuProvider cpuProvider,
+            OshiMemoryProvider memoryProvider,
+            GpuProvider gpuProvider,
+            DiskProvider diskProvider,
+            ServiceProvider serviceProvider,
+            HostProvider hostProvider,
+            NetworkProvider networkProvider) {
+        this.networkProvider = networkProvider;
         this.cpuProvider = cpuProvider;
         this.memoryProvider = memoryProvider;
         this.gpuProvider = gpuProvider;
@@ -177,13 +194,13 @@ public final class DashboardPage extends Page {
                         "  Esc / Enter   Close detail overlay"
                 );
             }
-            if (card.filesystem()) {
+            if (card.filesystem() || card.moreFilesystems()) {
                 return List.of(
                         "  ←/→           Switch between KPI drill-ins",
                         "  h/l           Move inspection cursor left / right",
                         "  [ / ] or t    Change time range (15M / 1H / 6H)",
                         "  Tab           Toggle Read / Write I/O series",
-                        "  ↑/↓ or j/k    Switch filesystem (when multiple exist)",
+                        "  ↑/↓ or j/k    Switch filesystem (in the +N more drill-in)",
                         "  e             Toggle metric explanation box",
                         "  Esc / Enter   Close detail overlay"
                 );
@@ -251,15 +268,15 @@ public final class DashboardPage extends Page {
         } else if (details.get() && card.kind() == OverviewCard.Kind.CPU && perCore.get()
                 && isPreviousCoreKey(key)) {
             selectedCore.updateAndGet(value -> Math.max(0, value - 1));
-        } else if (details.get() && card.filesystem()
+        } else if (details.get() && (card.filesystem() || card.moreFilesystems())
                 && key.getKeyType() == KeyType.Tab) {
             filesystemWrite.set(!filesystemWrite.get());
             resetCursor();
-        } else if (details.get() && card.filesystem() && isNextCoreKey(key)) {
+        } else if (details.get() && card.moreFilesystems() && isNextCoreKey(key)) {
             int max = Math.max(0, filesystemCount() - 1);
             selectedFilesystem.updateAndGet(value -> Math.min(value + 1, max));
             resetCursor();
-        } else if (details.get() && card.filesystem() && isPreviousCoreKey(key)) {
+        } else if (details.get() && card.moreFilesystems() && isPreviousCoreKey(key)) {
             selectedFilesystem.updateAndGet(value -> Math.max(0, value - 1));
             resetCursor();
         } else if (details.get() && key.getKeyType() == KeyType.ArrowRight) {
@@ -307,7 +324,7 @@ public final class DashboardPage extends Page {
             return;
         }
         if (!details.get()) {
-            int tile = DashboardOverviewRenderer.hitTestTile(size, pos.getColumn(), pos.getRow());
+            int tile = DashboardOverviewRenderer.hitTestTile(size, cardCount(), pos.getColumn(), pos.getRow());
             if (tile >= 0) {
                 selectedCard.set(tile);
                 rememberColumn(tile);
@@ -329,7 +346,8 @@ public final class DashboardPage extends Page {
     }
 
     private void moveVerticalCard(int delta) {
-        int max = Math.max(0, cardCount() - 1);
+        int count = cardCount();
+        int max = Math.max(0, count - 1);
         selectedCard.updateAndGet(current -> {
             if (delta > 0) {
                 if (current == 0) {
@@ -340,9 +358,13 @@ public final class DashboardPage extends Page {
                     lastCollageColumn.set(1);
                     return Math.min(3, max);
                 }
-                if (current == 2 || current == 3) {
-                    lastCollageColumn.set(current == 3 ? 1 : 0);
+                if (current == 2) {
+                    lastCollageColumn.set(0);
                     return Math.min(4, max);
+                }
+                if (current == 3) {
+                    lastCollageColumn.set(1);
+                    return Math.min(count >= 6 ? 5 : 4, max);
                 }
                 return current;
             }
@@ -355,16 +377,24 @@ public final class DashboardPage extends Page {
                 return 1;
             }
             if (current == 4) {
+                if (count >= 6) {
+                    lastCollageColumn.set(0);
+                    return 2;
+                }
                 return lastCollageColumn.get() == 1 ? 3 : 2;
+            }
+            if (current == 5 || current == 6) {
+                lastCollageColumn.set(1);
+                return 3;
             }
             return current;
         });
     }
 
     private void rememberColumn(int cardIndex) {
-        if (cardIndex == 0 || cardIndex == 2) {
+        if (cardIndex == 0 || cardIndex == 2 || cardIndex == 4 && cardCount() >= 6) {
             lastCollageColumn.set(0);
-        } else if (cardIndex == 1 || cardIndex == 3) {
+        } else if (cardIndex == 1 || cardIndex == 3 || cardIndex == 5 || cardIndex == 6) {
             lastCollageColumn.set(1);
         }
     }
@@ -396,7 +426,7 @@ public final class DashboardPage extends Page {
         perCore.set(false);
         selectedCore.set(0);
         filesystemWrite.set(false);
-        selectedFilesystem.set(primaryFilesystemIndex());
+        selectedFilesystem.set(0);
         explainer.set(false);
         resetCursor();
     }
@@ -418,7 +448,7 @@ public final class DashboardPage extends Page {
         perCore.set(false);
         selectedCore.set(0);
         filesystemWrite.set(false);
-        selectedFilesystem.set(primaryFilesystemIndex());
+        selectedFilesystem.set(0);
         resetCursor();
     }
 
@@ -479,11 +509,11 @@ public final class DashboardPage extends Page {
                 cpuHistory;
             case RAM ->
                 memoryHistory;
-            case TEMPERATURE ->
-                temperatureHistory;
+            case NETWORK ->
+                networkRxHistory;
             case GPU ->
                 gpuHistory;
-            case FILESYSTEM -> {
+            case FILESYSTEM, MORE_FILESYSTEMS -> {
                 String mountPoint = activeDetailFilesystemMountPoint();
                 if (mountPoint == null) {
                     yield null;
@@ -496,27 +526,21 @@ public final class DashboardPage extends Page {
         };
     }
 
-    private int primaryFilesystemIndex() {
-        DashboardSnapshot current = snapshot.get();
-        if (current == null || current.disk() == null) {
-            return 0;
-        }
-        return Math.max(0, OverviewCard.primaryFilesystemIndex(current.disk().filesystems()));
-    }
-
     private int filesystemCount() {
-        DashboardSnapshot current = snapshot.get();
-        return current == null || current.disk() == null ? 0 : current.disk().filesystems().size();
+        return OverviewCard.overflowFilesystems(snapshot.get()).size();
     }
 
     private String activeDetailFilesystemMountPoint() {
-        DashboardSnapshot current = snapshot.get();
-        if (current != null && current.disk() != null && !current.disk().filesystems().isEmpty()) {
-            List<DiskSnapshot.Filesystem> filesystems = current.disk().filesystems();
-            int index = Math.max(0, Math.min(selectedFilesystem.get(), filesystems.size() - 1));
-            return filesystems.get(index).mountPoint();
+        OverviewCard card = currentCard();
+        if (card.filesystem()) {
+            return card.mountPoint();
         }
-        return currentCard().mountPoint();
+        List<DiskSnapshot.Filesystem> overflow = OverviewCard.overflowFilesystems(snapshot.get());
+        if (overflow.isEmpty()) {
+            return null;
+        }
+        int index = Math.max(0, Math.min(selectedFilesystem.get(), overflow.size() - 1));
+        return overflow.get(index).mountPoint();
     }
 
     private OverviewCard currentCard() {
@@ -589,11 +613,21 @@ public final class DashboardPage extends Page {
             errors.put("Disks", message(e));
             recordProviderError("Disks", message(e));
         }
+        NetworkSnapshot network = null;
+        if (networkProvider != null) {
+            try {
+                network = networkProvider.read();
+                recordProviderOk("Network");
+            } catch (IOException | RuntimeException e) {
+                errors.put("Network", message(e));
+                recordProviderError("Network", message(e));
+            }
+        }
         Double cpuUsage = cpu == null ? null : cpu.totalUsagePercent();
         cpuHistory.append(cpuUsage == null ? Double.NaN : cpuUsage);
         appendCoreHistories(cpu);
-        temperatureHistory.append(cpu == null || cpu.temperatureCelsius() == null
-                ? Double.NaN : cpu.temperatureCelsius());
+        networkRxHistory.append(network == null ? Double.NaN : mib(network.rxBytesPerSecond()));
+        networkTxHistory.append(network == null ? Double.NaN : mib(network.txBytesPerSecond()));
         memoryHistory.append(memory == null
                 ? Double.NaN
                 : ratio(memory.usedBytes(), memory.totalBytes()));
@@ -608,7 +642,7 @@ public final class DashboardPage extends Page {
                 filesystemEvent(fs);
             }
         }
-        updateSnapshot(cpu, memory, null, disk, null, errors, readHost());
+        updateSnapshot(cpu, memory, null, disk, null, errors, readHost(), network);
     }
 
     /**
@@ -721,12 +755,19 @@ public final class DashboardPage extends Page {
     void updateSnapshot(CpuSnapshot cpu, MemorySnapshot memory, GpuReading gpu,
             DiskSnapshot disk, List<ServiceSnapshot> services, Map<String, String> errors,
             HostSnapshot host) {
+        updateSnapshot(cpu, memory, gpu, disk, services, errors, host, null);
+    }
+
+    void updateSnapshot(CpuSnapshot cpu, MemorySnapshot memory, GpuReading gpu,
+            DiskSnapshot disk, List<ServiceSnapshot> services, Map<String, String> errors,
+            HostSnapshot host, NetworkSnapshot network) {
         DashboardSnapshot old = snapshot.get();
         snapshot.set(new DashboardSnapshot(Instant.now(), cpu != null ? cpu : old == null ? null : old.cpu(),
                 memory != null ? memory : old == null ? null : old.memory(), gpu != null ? gpu : old == null ? null : old.gpu(),
                 disk != null ? disk : old == null ? null : old.disk(), services != null ? services : old == null ? List.of() : old.services(),
                 errors.isEmpty() && old != null ? old.errors() : errors,
-                host != null ? host : old == null ? null : old.host()));
+                host != null ? host : old == null ? null : old.host(),
+                network != null ? network : old == null ? null : old.network()));
         pageError.set(errors.isEmpty() ? null : errors.values().iterator().next());
     }
 
@@ -857,7 +898,7 @@ public final class DashboardPage extends Page {
     public void render(TextGraphics graphics, TerminalSize size) {
         lastRenderSize.set(size);
         DashboardOverviewRenderer.draw(graphics, size, snapshot.get(), cpuHistory, memoryHistory,
-                swapHistory, temperatureHistory, gpuHistory, diskIoHistory,
+                swapHistory, networkRxHistory, networkTxHistory, gpuHistory, diskIoHistory,
                 eventLog, pageError.get(), selectedCard.get(), details.get(), detailRange.get(),
                 detailCursor(), perCore.get(), explainer.get(), coreHistories.get(), selectedCore.get(),
                 coreCursors.get().stream().mapToInt(AtomicInteger::get).toArray(),

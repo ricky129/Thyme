@@ -17,6 +17,7 @@ import com.ricky.thyme.exec.CommandRunner;
 import com.ricky.thyme.feature.disk.DiskSnapshot;
 import com.ricky.thyme.feature.gpu.GpuReading;
 import com.ricky.thyme.feature.gpu.GpuSnapshot;
+import com.ricky.thyme.feature.network.NetworkSnapshot;
 import com.ricky.thyme.feature.services.ServiceProvider;
 import com.ricky.thyme.feature.telemetry.EventLogBuffer;
 import java.io.IOException;
@@ -114,7 +115,7 @@ class DashboardPageTest {
     }
 
     @Test
-    void diskDrillInOpensOnPrimaryAndCyclesAllMountedFilesystems() {
+    void filesystemDrillInIsScopedToItsOwnMount() {
         DashboardPage page = new DashboardPage(null, null, null, null, null, null);
         page.updateSnapshot(null, null, null, new DiskSnapshot(List.of(), List.of(
                 filesystem("/home"), filesystem("/"), filesystem("/media/usb"))), null, Map.of());
@@ -125,7 +126,7 @@ class DashboardPageTest {
 
         page.handleKey(new KeyStroke(KeyType.Enter));
         assertTrue(page.showingDetails());
-        assertEquals(1, page.selectedFilesystem());
+        assertEquals(0, page.selectedFilesystem());
 
         // Tab toggles read/write inside the disk drill-in.
         assertFalse(page.filesystemWriteSelected());
@@ -134,28 +135,105 @@ class DashboardPageTest {
         page.handleKey(new KeyStroke(KeyType.Tab));
         assertFalse(page.filesystemWriteSelected());
 
-        // ↑/↓ switch between mounted filesystems.
+        // ↑/↓ do not switch filesystems in a single-mount drill-in.
         page.handleKey(new KeyStroke(KeyType.ArrowDown));
-        assertEquals(2, page.selectedFilesystem());
-        page.handleKey(new KeyStroke(KeyType.ArrowUp));
-        assertEquals(1, page.selectedFilesystem());
-        page.handleKey(new KeyStroke(KeyType.ArrowUp));
         assertEquals(0, page.selectedFilesystem());
 
         // ←/→ move to the previous/next drill-in.
         page.handleKey(new KeyStroke(KeyType.ArrowLeft));
         assertEquals(3, page.selectedCard());
         page.handleKey(new KeyStroke(KeyType.ArrowRight));
-        assertEquals(4, page.selectedCard());
-        assertEquals(1, page.selectedFilesystem());
+        page.handleKey(new KeyStroke(KeyType.ArrowRight));
+        assertEquals(5, page.selectedCard());
 
         page.handleKey(new KeyStroke(KeyType.Escape));
         assertFalse(page.showingDetails());
-        assertEquals(4, page.selectedCard());
+        assertEquals(5, page.selectedCard());
     }
 
     @Test
-    void clampsCardSelectionToFiveCollageTilesEvenWithMultipleFilesystems() {
+    void moreFilesystemsDrillInCyclesTheOverflowMounts() {
+        DashboardPage page = new DashboardPage(null, null, null, null, null, null);
+        page.updateSnapshot(null, null, null, new DiskSnapshot(List.of(), List.of(
+                filesystem("/"), filesystem("/home"), filesystem("/media/usb"),
+                filesystem("/mnt/a"))), null, Map.of());
+
+        for (int index = 0; index < 6; index++) {
+            page.handleKey(new KeyStroke(KeyType.ArrowRight));
+        }
+        assertEquals(6, page.selectedCard());
+        page.handleKey(new KeyStroke(KeyType.Enter));
+        assertTrue(page.showingDetails());
+        assertEquals(0, page.selectedFilesystem());
+
+        page.handleKey(new KeyStroke(KeyType.ArrowDown));
+        assertEquals(1, page.selectedFilesystem());
+        page.handleKey(new KeyStroke(KeyType.ArrowDown));
+        assertEquals(1, page.selectedFilesystem());
+        page.handleKey(new KeyStroke('k', false, false));
+        assertEquals(0, page.selectedFilesystem());
+
+        page.handleKey(new KeyStroke(KeyType.Tab));
+        assertTrue(page.filesystemWriteSelected());
+    }
+
+    @Test
+    void navigatesTheSixAndSevenTileCollages() {
+        DashboardPage seven = new DashboardPage(null, null, null, null, null, null);
+        seven.updateSnapshot(null, null, null, diskWithFilesystems(), null, Map.of());
+        seven.handleKey(new KeyStroke(KeyType.ArrowDown));
+        seven.handleKey(new KeyStroke(KeyType.ArrowDown));
+        assertEquals(4, seven.selectedCard());
+        seven.handleKey(new KeyStroke(KeyType.ArrowRight));
+        seven.handleKey(new KeyStroke(KeyType.ArrowRight));
+        assertEquals(6, seven.selectedCard());
+        seven.handleKey(new KeyStroke(KeyType.ArrowUp));
+        assertEquals(3, seven.selectedCard());
+        seven.handleKey(new KeyStroke(KeyType.ArrowDown));
+        assertEquals(5, seven.selectedCard());
+        seven.handleKey(new KeyStroke(KeyType.ArrowUp));
+        seven.handleKey(new KeyStroke(KeyType.ArrowLeft));
+        assertEquals(2, seven.selectedCard());
+        seven.handleKey(new KeyStroke(KeyType.ArrowDown));
+        assertEquals(4, seven.selectedCard());
+        seven.handleKey(new KeyStroke(KeyType.ArrowUp));
+        assertEquals(2, seven.selectedCard());
+
+        DashboardPage six = new DashboardPage(null, null, null, null, null, null);
+        six.updateSnapshot(null, null, null, new DiskSnapshot(List.of(), List.of(
+                filesystem("/"), filesystem("/home"))), null, Map.of());
+        six.handleKey(new KeyStroke(KeyType.ArrowRight));
+        six.handleKey(new KeyStroke(KeyType.ArrowDown));
+        six.handleKey(new KeyStroke(KeyType.ArrowDown));
+        assertEquals(5, six.selectedCard());
+        six.handleKey(new KeyStroke(KeyType.ArrowUp));
+        assertEquals(3, six.selectedCard());
+    }
+
+    @Test
+    void rendersNetworkRatesFromTheSnapshot() throws IOException {
+        DashboardPage page = new DashboardPage(null, null, null, null, null, null);
+        page.updateSnapshot(null, null, null, null, null, Map.of(), null,
+                new NetworkSnapshot(1024.0 * 1024, 512.0 * 1024, List.of()));
+        TerminalSize size = new TerminalSize(120, 35);
+        DefaultVirtualTerminal terminal = new DefaultVirtualTerminal(size);
+        try (Screen screen = new TerminalScreen(terminal)) {
+            screen.startScreen();
+            page.render(screen.newTextGraphics(), size);
+            screen.refresh();
+            StringBuilder text = new StringBuilder();
+            for (int row = 0; row < size.getRows(); row++) {
+                for (int column = 0; column < size.getColumns(); column++) {
+                    text.append(terminal.getCharacter(column, row).getCharacter());
+                }
+            }
+            assertTrue(text.toString().contains("↓1"));
+            assertTrue(text.toString().contains("↑0"));
+        }
+    }
+
+    @Test
+    void clampsCardSelectionToSevenCollageTilesWithManyFilesystems() {
         DashboardPage page = new DashboardPage(null, null, null, null, null, null);
         page.updateSnapshot(null, null, null, diskWithFilesystems(), null, Map.of());
 
@@ -163,7 +241,7 @@ class DashboardPageTest {
             page.handleKey(new KeyStroke(KeyType.ArrowRight));
         }
 
-        assertEquals(OverviewCard.SYSTEM_CARD_COUNT, page.selectedCard());
+        assertEquals(6, page.selectedCard());
     }
 
     @Test
@@ -177,7 +255,7 @@ class DashboardPageTest {
             page.render(screen.newTextGraphics(), size);
         }
 
-        for (DashboardOverviewRenderer.TileRect tile : DashboardOverviewRenderer.computeTiles(size)) {
+        for (DashboardOverviewRenderer.TileRect tile : DashboardOverviewRenderer.computeTiles(size, 7)) {
             page.handleKey(new MouseAction(MouseActionType.CLICK_DOWN, 1,
                     new TerminalPosition(tile.x() + 2, tile.y() + 2)));
             assertTrue(page.showingDetails());
@@ -191,7 +269,7 @@ class DashboardPageTest {
         }
 
         // Clicking a tile, then clicking outside the overlay closes it.
-        DashboardOverviewRenderer.TileRect first = DashboardOverviewRenderer.computeTiles(size).get(0);
+        DashboardOverviewRenderer.TileRect first = DashboardOverviewRenderer.computeTiles(size, 7).get(0);
         page.handleKey(new MouseAction(MouseActionType.CLICK_DOWN, 1,
                 new TerminalPosition(first.x() + 2, first.y() + 2)));
         assertTrue(page.showingDetails());

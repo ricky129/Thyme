@@ -49,6 +49,25 @@ class ContainerProviderTest {
     }
 
     @Test
+    void readsTheIconLabelsFromInspectWithThymeFirst() throws Exception {
+        assertEquals("si:nginx", iconFor(RUNNING_ID + "|0|0|si:nginx|si:jellyfin\n"));
+        assertEquals("si:jellyfin", iconFor(RUNNING_ID + "|0|0||si:jellyfin\n"));
+        assertEquals(null, iconFor(RUNNING_ID + "|0|0||\n"));
+        assertEquals(null, iconFor(RUNNING_ID + "|0|0\n"));
+    }
+
+    private static String iconFor(String inspectOutput) throws Exception {
+        ContainerProvider provider = new ContainerProvider((command, timeout) -> switch (command.get(1)) {
+            case "ps" -> ok("{\"ID\":\"" + RUNNING_ID + "\",\"Names\":\"web\",\"Image\":\"nginx\","
+                    + "\"State\":\"running\",\"Status\":\"Up\",\"RunningFor\":\"1 hour\"}\n");
+            case "stats" -> ok("");
+            case "inspect" -> ok(inspectOutput);
+            default -> throw new AssertionError(command);
+        });
+        return provider.list().getFirst().icon();
+    }
+
+    @Test
     void executesValidatedContainerLifecycleAndLogCommands() throws Exception {
         List<List<String>> calls = new ArrayList<>();
         ContainerProvider provider = new ContainerProvider((command, timeout) -> {

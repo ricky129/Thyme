@@ -1,8 +1,11 @@
 package com.ricky.thyme.feature.containers;
 
+import com.googlecode.lanterna.TerminalPosition;
 import com.googlecode.lanterna.TerminalSize;
 import com.googlecode.lanterna.input.KeyStroke;
 import com.googlecode.lanterna.input.KeyType;
+import com.googlecode.lanterna.input.MouseAction;
+import com.googlecode.lanterna.input.MouseActionType;
 import com.googlecode.lanterna.screen.Screen;
 import com.googlecode.lanterna.screen.TerminalScreen;
 import com.googlecode.lanterna.terminal.virtual.DefaultVirtualTerminal;
@@ -12,12 +15,18 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class ContainerPageTest {
+
+    @TempDir
+    Path directory;
 
     private static final List<TerminalSize> SIZES = List.of(
             new TerminalSize(48, 15),
@@ -155,8 +164,8 @@ class ContainerPageTest {
         page.onShow(Runnable::run);
         injectContainers(page, sampleList);
 
-        // Navigation ↓ (j / ArrowDown)
-        page.handleKey(new KeyStroke('j', false, false));
+        // Navigation → (l / ArrowRight) moves to the second card
+        page.handleKey(new KeyStroke('l', false, false));
         // Open details
         page.handleKey(new KeyStroke(KeyType.Enter));
         assertTrue(page.capturesGlobalNavigation());
@@ -207,6 +216,189 @@ class ContainerPageTest {
         // Press Esc to clear filter
         page.handleKey(new KeyStroke(KeyType.Escape));
         assertEquals("web-app", textContainerName(page)); // first of all 3
+    }
+
+    private static String id(int n) {
+        return String.format("%012x", n + 1);
+    }
+
+    private static List<ContainerSnapshot> many(int count) {
+        List<ContainerSnapshot> list = new ArrayList<>();
+        for (int index = 0; index < count; index++) {
+            list.add(new ContainerSnapshot(id(index), "svc-" + index, "acme/svc" + index,
+                    index % 3 == 2 ? "exited" : "running", "Up", "1h", index % 4, null,
+                    "1.0%", "10MiB / 1GiB", "1%", "0B / 0B", "0B / 0B", "1"));
+        }
+        return list;
+    }
+
+    @Test
+    void computesNonOverlappingCardsAndHitTestingAcrossBreakpointsAndScroll() {
+        for (TerminalSize size : SIZES) {
+            for (int count : List.of(1, 5, 13, 40)) {
+                int cols = ContainerPage.gridColumns(size.getColumns());
+                int rows = (count + cols - 1) / cols;
+                int visible = ContainerPage.visibleRows(size);
+                for (int scroll : List.of(0, Math.max(0, rows - visible))) {
+                    List<ContainerPage.CardRect> cards = ContainerPage.computeCards(size, count, scroll);
+                    assertFalse(cards.isEmpty());
+                    for (int i = 0; i < cards.size(); i++) {
+                        ContainerPage.CardRect card = cards.get(i);
+                        assertTrue(card.width() >= 20, "card too narrow at " + size);
+                        assertTrue(card.x() >= 0 && card.x() + card.width() <= size.getColumns());
+                        assertTrue(card.y() >= 2 && card.y() + card.height() <= size.getRows() - 1);
+                        assertEquals(card.containerIndex(), ContainerPage.hitTestCard(
+                                size, count, scroll, card.x(), card.y()));
+                        assertEquals(card.containerIndex(), ContainerPage.hitTestCard(size, count, scroll,
+                                card.x() + card.width() - 1, card.y() + card.height() - 1));
+                        for (int j = i + 1; j < cards.size(); j++) {
+                            ContainerPage.CardRect other = cards.get(j);
+                            boolean separated = card.x() + card.width() <= other.x()
+                                    || other.x() + other.width() <= card.x()
+                                    || card.y() + card.height() <= other.y()
+                                    || other.y() + other.height() <= card.y();
+                            assertTrue(separated, "cards overlap at " + size);
+                        }
+                    }
+                }
+            }
+            assertEquals(-1, ContainerPage.hitTestCard(size, 5, 0, 0, 0));
+        }
+    }
+
+    @Test
+    void navigatesTheCardGridInTwoDimensions() throws IOException {
+        ContainerPage page = new ContainerPage(new ContainerProvider((cmd, timeout) -> ok("")));
+        injectContainers(page, many(7));
+        TerminalSize size = new TerminalSize(120, 35);
+        writeSnapshot("containers-grid", size, page);
+
+        page.handleKey(new KeyStroke(KeyType.ArrowRight));
+        assertEquals("svc-1", textContainerName(page));
+        page.handleKey(new KeyStroke(KeyType.ArrowDown));
+        assertEquals("svc-5", textContainerName(page));
+        page.handleKey(new KeyStroke(KeyType.ArrowDown));
+        assertEquals("svc-5", textContainerName(page));
+        page.handleKey(new KeyStroke(KeyType.ArrowUp));
+        assertEquals("svc-1", textContainerName(page));
+        page.handleKey(new KeyStroke(KeyType.ArrowLeft));
+        assertEquals("svc-0", textContainerName(page));
+        page.handleKey(new KeyStroke('j', false, false));
+        assertEquals("svc-4", textContainerName(page));
+        page.handleKey(new KeyStroke('l', false, false));
+        assertEquals("svc-5", textContainerName(page));
+        page.handleKey(new KeyStroke('k', false, false));
+        assertEquals("svc-1", textContainerName(page));
+        page.handleKey(new KeyStroke('h', false, false));
+        assertEquals("svc-0", textContainerName(page));
+    }
+
+    @Test
+    void scrollsTheGridToKeepTheSelectionVisible() throws IOException {
+        ContainerPage page = new ContainerPage(new ContainerProvider((cmd, timeout) -> ok("")));
+        injectContainers(page, many(40));
+        TerminalSize size = new TerminalSize(80, 24);
+        writeSnapshot("containers-scroll", size, page);
+        for (int index = 0; index < 10; index++) {
+            page.handleKey(new KeyStroke(KeyType.ArrowDown));
+            writeSnapshot("containers-scroll", size, page);
+        }
+
+        assertEquals("svc-30", textContainerName(page));
+        String text = Files.readString(Path.of("target", "ui-snapshots", "containers-scroll-80x24.txt"));
+        assertTrue(text.contains("svc-30"));
+        assertFalse(text.contains("svc-0 "));
+    }
+
+    @Test
+    void mouseClickOpensACardAndClickingOutsideOrOnTheBorderClosesIt() throws IOException {
+        ContainerPage page = new ContainerPage(new ContainerProvider((cmd, timeout) -> ok("")));
+        page.onShow(Runnable::run);
+        injectContainers(page, many(3));
+        TerminalSize size = new TerminalSize(120, 35);
+        writeSnapshot("containers-click", size, page);
+
+        ContainerPage.CardRect card = ContainerPage.computeCards(size, 3, 0).get(1);
+        page.handleKey(new MouseAction(MouseActionType.CLICK_DOWN, 1,
+                new TerminalPosition(card.x() + 2, card.y() + 2)));
+        assertTrue(page.capturesGlobalNavigation());
+        assertEquals("svc-1", textContainerName(page));
+
+        ContainerPage.OverlayRect overlay = ContainerPage.computeDetailRect(size);
+        page.handleKey(new MouseAction(MouseActionType.CLICK_DOWN, 1,
+                new TerminalPosition(overlay.x() + 3, overlay.y() + 3)));
+        assertTrue(page.capturesGlobalNavigation(), "clicks inside the overlay keep it open");
+        page.handleKey(new MouseAction(MouseActionType.CLICK_DOWN, 1,
+                new TerminalPosition(overlay.x() + 3, overlay.y())));
+        assertFalse(page.capturesGlobalNavigation());
+
+        page.handleKey(new MouseAction(MouseActionType.CLICK_DOWN, 1,
+                new TerminalPosition(card.x() + 2, card.y() + 2)));
+        assertTrue(page.capturesGlobalNavigation());
+        page.handleKey(new MouseAction(MouseActionType.CLICK_DOWN, 1, new TerminalPosition(0, 0)));
+        assertFalse(page.capturesGlobalNavigation());
+
+        // Right clicks and releases do nothing.
+        page.handleKey(new MouseAction(MouseActionType.CLICK_DOWN, 3,
+                new TerminalPosition(card.x() + 2, card.y() + 2)));
+        page.handleKey(new MouseAction(MouseActionType.CLICK_RELEASE, 1,
+                new TerminalPosition(card.x() + 2, card.y() + 2)));
+        assertFalse(page.capturesGlobalNavigation());
+        page.onHide();
+    }
+
+    @Test
+    void convertsIconsForNewContainersWhileRunning() throws IOException {
+        String svg = "<svg viewBox=\"0 0 24 24\"><path d=\"M0 0h24v24H0z\"/></svg>";
+        List<String> fetched = new ArrayList<>();
+        ContainerIconCache cache = new ContainerIconCache(directory.resolve("icons.json"), slug -> {
+            fetched.add(slug);
+            return "nginx".equals(slug) || "redis".equals(slug) ? Optional.of(svg) : Optional.empty();
+        });
+        AtomicReference<List<ContainerSnapshot>> docker = new AtomicReference<>(List.of(
+                new ContainerSnapshot(id(0), "web", "nginx:alpine", "running", "Up", "1h", 0,
+                        null, "1%", "1MiB", "1%", "0B", "0B", "1"),
+                new ContainerSnapshot(id(1), "mystery", "acme/mystery", "running", "Up", "1h", 0,
+                        null, "1%", "1MiB", "1%", "0B", "0B", "1")));
+        ContainerProvider provider = new ContainerProvider((cmd, timeout) -> switch (cmd.get(1)) {
+            case "ps" -> {
+                StringBuilder out = new StringBuilder();
+                for (ContainerSnapshot c : docker.get()) {
+                    out.append("{\"ID\":\"").append(c.id()).append("\",\"Names\":\"").append(c.name())
+                            .append("\",\"Image\":\"").append(c.image())
+                            .append("\",\"State\":\"running\",\"Status\":\"Up\",\"RunningFor\":\"1h\"}\n");
+                }
+                yield ok(out.toString());
+            }
+            case "inspect" -> {
+                StringBuilder out = new StringBuilder();
+                for (ContainerSnapshot c : docker.get()) {
+                    out.append(c.id()).append("|0|0\n");
+                }
+                yield ok(out.toString());
+            }
+            default -> ok("");
+        });
+        ContainerPage page = new ContainerPage(provider, cache);
+        page.onShow(Runnable::run);
+
+        assertFalse(cache.resolve(docker.get().get(0)).placeholder());
+        assertTrue(cache.resolve(docker.get().get(1)).placeholder());
+        TerminalSize size = new TerminalSize(120, 35);
+        writeSnapshot("containers-icons", size, page);
+        String text = Files.readString(Path.of("target", "ui-snapshots", "containers-icons-120x35.txt"));
+        assertTrue(text.contains("⣿⣿⣿⣿⣿⣿") || text.contains("██████"), "converted icon is drawn");
+
+        // A container started later is converted by the next refresh.
+        List<ContainerSnapshot> grown = new ArrayList<>(docker.get());
+        grown.add(new ContainerSnapshot(id(2), "cache", "redis:7", "running", "Up", "1h", 0,
+                null, "1%", "1MiB", "1%", "0B", "0B", "1"));
+        docker.set(grown);
+        fetched.clear();
+        page.refresh();
+        assertEquals(List.of("redis"), fetched);
+        assertFalse(cache.resolve(grown.get(2)).placeholder());
+        page.onHide();
     }
 
     private static String textContainerName(ContainerPage page) {
