@@ -3,7 +3,7 @@ package com.ricky.thyme.feature.disk;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import com.ricky.thyme.exec.CommandRunner;
+import com.ricky.thyme.exec.ICommandRunner;
 import java.util.List;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -147,7 +147,7 @@ class LinuxDiskProviderTest {
         Files.writeString(diskStats,
                 "8 1 sda1 10 0 100 50 20 0 200 40 0 60 90\n"
                         + "8 17 sdb1 10 0 100 50 20 0 200 40 0 60 90\n");
-        CommandRunner btrfs = (command, timeout) -> new CommandRunner.Result(
+        ICommandRunner btrfs = (command, timeout) -> new ICommandRunner.Result(
                 0,
                 "Label: none uuid: abcd\n"
                         + "Total devices 2 FS bytes used 123\n"

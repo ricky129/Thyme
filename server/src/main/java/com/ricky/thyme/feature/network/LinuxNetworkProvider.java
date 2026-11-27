@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 
 /** Stub: collection logic is intentionally not implemented yet. */
-public final class LinuxNetworkProvider implements NetworkProvider {
+public final class LinuxNetworkProvider implements INetworkProvider {
 
     public LinuxNetworkProvider() {
         // TODO: delegate to the default host root

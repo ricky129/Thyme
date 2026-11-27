@@ -8,7 +8,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.*;
 
-public final class ProcessCommandRunner implements CommandRunner {
+public final class ProcessCommandRunner implements ICommandRunner {
     private static final int MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 
     @Override

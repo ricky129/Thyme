@@ -37,7 +37,7 @@ public final class ContainerPage extends Page {
     private static final String[] DOCK_LABELS = {"Home", "Containers"};
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
 
-    private final ContainerProvider provider;
+    private final IContainerProvider provider;
     private final ContainerIconCache iconCache;
     private final AtomicBoolean syncingIcons = new AtomicBoolean();
     private final AtomicReference<TerminalSize> lastRenderSize = new AtomicReference<>();
@@ -59,11 +59,11 @@ public final class ContainerPage extends Page {
     private boolean filtering;
     private String filterQuery = "";
 
-    public ContainerPage(ContainerProvider provider) {
+    public ContainerPage(IContainerProvider provider) {
         this(provider, ContainerIconCache.inMemory());
     }
 
-    public ContainerPage(ContainerProvider provider, ContainerIconCache iconCache) {
+    public ContainerPage(IContainerProvider provider, ContainerIconCache iconCache) {
         this.provider = provider;
         this.iconCache = iconCache;
     }

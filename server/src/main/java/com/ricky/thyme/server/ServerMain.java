@@ -3,7 +3,7 @@ package com.ricky.thyme.server;
 import com.ricky.thyme.exec.ProcessCommandRunner;
 import com.ricky.thyme.feature.containers.ContainerIconCache;
 import com.ricky.thyme.feature.containers.ContainerPage;
-import com.ricky.thyme.feature.containers.ContainerProvider;
+import com.ricky.thyme.feature.containers.DockerContainerProvider;
 import com.ricky.thyme.feature.cpu.OshiCpuProvider;
 import com.ricky.thyme.feature.dashboard.DashboardPage;
 import com.ricky.thyme.feature.disk.LinuxDiskProvider;
@@ -51,7 +51,7 @@ public final class ServerMain {
     }
 
     private static void syncContainerIcons() throws IOException, InterruptedException {
-        var provider = new ContainerProvider(new ProcessCommandRunner());
+        var provider = new DockerContainerProvider();
         ContainerIconCache.defaultCache().sync(provider.list());
     }
 
@@ -70,7 +70,9 @@ public final class ServerMain {
                 new OshiMemoryProvider(),
                 gpuProvider, diskProvider, serviceProvider, new OshiHostProvider(),
                 new LinuxNetworkProvider(hostRoot));
-        var containers = new ContainerPage(new ContainerProvider(runner), ContainerIconCache.defaultCache());
+        var containers = new ContainerPage(
+                new DockerContainerProvider(hostRoot.resolve("var/run/docker.sock")),
+                ContainerIconCache.defaultCache());
         new Shell(new PageRegistry(java.util.List.of(
                 new PageRegistry.Entry("overview", dashboard),
                 new PageRegistry.Entry("containers", containers)))).run();

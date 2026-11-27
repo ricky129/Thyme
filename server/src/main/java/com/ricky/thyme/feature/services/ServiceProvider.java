@@ -2,7 +2,7 @@ package com.ricky.thyme.feature.services;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.ricky.thyme.exec.CommandRunner;
+import com.ricky.thyme.exec.ICommandRunner;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -12,9 +12,9 @@ public final class ServiceProvider {
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private final CommandRunner runner;
+    private final ICommandRunner runner;
 
-    public ServiceProvider(CommandRunner runner) {
+    public ServiceProvider(ICommandRunner runner) {
         this.runner = runner;
     }
 

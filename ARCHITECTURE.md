@@ -55,7 +55,7 @@ Shell / Page ── schedules ──▶ Provider ── reads ──▶ OSHI, /p
 - A **Provider** reads or decodes data and returns typed values. OSHI is used for CPU and memory; Linux providers use proc/sys files or system commands for other metrics and features.
 - A **Snapshot** carries immutable data from collection to rendering. Missing data remains distinct from a measured zero.
 - `Shell` keeps slow collection and command work off the terminal input/render loop. It alone owns and updates the Lanterna screen.
-- External feature commands use `CommandRunner`, which accepts argument lists and timeouts rather than shell command strings. `ProcessCommandRunner` drains and caps output and terminates timed-out children.
+- External feature commands use `ICommandRunner`, which accepts argument lists and timeouts rather than shell command strings. `ProcessCommandRunner` drains and caps output and terminates timed-out children.
 - UI actions that mutate host state are validated before execution; Docker actions require confirmation in `ContainerPage`.
 
 For example, `DashboardPage` asks the CPU, memory, GPU, disk, and service providers for data, combines the results into `DashboardSnapshot`, and renders the available panels. The shell can continue drawing while collection runs.
@@ -83,8 +83,8 @@ Paths below are relative to the repository root.
 | `server/src/main/java/com/ricky/thyme/server/ServerMain.java` | Server entry point; configures OSHI, composes providers/pages, and starts the shell. |
 | `server/src/main/java/com/ricky/thyme/ui/Page.java` | Shared page lifecycle, input, and rendering contract. |
 | `server/src/main/java/com/ricky/thyme/ui/Shell.java` | Owns the screen, input/render loop, refresh scheduling, and page navigation. |
-| `server/src/main/java/com/ricky/thyme/exec/CommandRunner.java` | Interface for external feature commands, including the structured result record. |
-| `server/src/main/java/com/ricky/thyme/exec/ProcessCommandRunner.java` | Runs bounded child processes and collects their output. |
+| `server/src/main/java/com/ricky/thyme/exec/ICommandRunner.java` | Interface for external feature commands, including the structured result record. |
+| `server/src/main/java/com/ricky/thyme/exec/ProcessICommandRunner.java` | Runs bounded child processes and collects their output. |
 | `server/src/main/java/com/ricky/thyme/feature/dashboard/DashboardPage.java`, `DashboardSnapshot.java` | Collects/composes system metrics and renders the main dashboard. |
 | `server/src/main/java/com/ricky/thyme/feature/cpu/` | CPU snapshot and OSHI provider. |
 | `server/src/main/java/com/ricky/thyme/feature/memory/` | Memory snapshot, OSHI provider, and standalone memory page. |
@@ -92,7 +92,7 @@ Paths below are relative to the repository root.
 | `server/src/main/java/com/ricky/thyme/feature/disk/` | Disk/filesystem snapshot and Linux collection provider. |
 | `server/src/main/java/com/ricky/thyme/feature/network/` | Network snapshot and provider contract (collection logic still to be implemented). |
 | `server/src/main/java/com/ricky/thyme/feature/services/` | systemd service model, provider, and standalone page implementation. |
-| `server/src/main/java/com/ricky/thyme/feature/containers/` | Docker data model/provider and the card-grid container page. `SvgIconRasterizer` turns Simple Icons SVGs into 6x3 sprites; `ContainerIconCache` keeps them in `~/.cache/thyme/container-icons.json`, fills it at deploy time (`ServerMain --sync-icons`, run by `deploy.sh`) and converts icons for new containers while the page runs. |
+| `server/src/main/java/com/ricky/thyme/feature/containers/` | Docker container model, provider/socket client contracts (`IContainerProvider`, `DockerContainerProvider`, `IDockerEngineClient`, `UnixSocketDockerClient`; socket logic still to be implemented), and the card-grid container page. `SvgIconRasterizer` turns Simple Icons SVGs into 6x3 sprites; `ContainerIconCache` keeps them in `~/.cache/thyme/container-icons.json`, fills it at deploy time (`ServerMain --sync-icons`, run by `deploy.sh`) and converts icons for new containers while the page runs. |
 | `server/src/moditect/jna-platform/module-info.java` | Explicit descriptor used when staging the JNA Platform dependency for `jlink`. |
 | `server/src/test/java/` | Provider, command runner, shell, and server-entry tests. |
 
@@ -116,10 +116,10 @@ Paths below are relative to the repository root.
 | Add a monitored metric | Relevant `server/.../feature/<name>/*Provider.java` and `*Snapshot.java`; connect it in `DashboardPage.java` and `DashboardSnapshot.java` | Tests under `server/src/test/java/com/ricky/thyme/feature/<name>/`; dashboard tests if composition/rendering changes |
 | Change dashboard layout or metric display | `server/.../feature/dashboard/DashboardPage.java`; update the snapshot only if collected data changes | Dashboard-focused tests; `server/.../ui/ShellTest.java` only if navigation/lifecycle changes |
 | Change terminal lifecycle, refresh cadence, or page navigation | `server/.../ui/Shell.java` and `Page.java` | `server/src/test/java/com/ricky/thyme/ui/ShellTest.java` |
-| Change container data or actions | `server/.../feature/containers/ContainerProvider.java`, `ContainerSnapshot.java`, and/or `ContainerPage.java` | Container provider tests and shell tests for navigation |
+| Change container data or actions | `server/.../feature/containers/IContainerProvider.java`, `DockerContainerProvider.java`, `UnixSocketDockerClient.java`, `ContainerSnapshot.java`, and/or `ContainerPage.java` | Container provider tests and shell tests for navigation |
 | Change service discovery or actions | `server/.../feature/services/ServiceProvider.java`, `ServiceSnapshot.java`, and active page integration | Service provider tests and page/shell tests |
 | Change local CLI options or SSH behavior | `client/.../Main.java`, `client/.../remote/ThymeConfig.java`, `SshTarget.java`, or `SshSessionLauncher.java` | `client/src/test/java/com/ricky/thyme/` and `remote/` tests |
-| Change command execution safety/limits | `server/.../exec/CommandRunner.java` or `ProcessCommandRunner.java` | `server/src/test/java/com/ricky/thyme/exec/ProcessCommandRunnerTest.java` |
+| Change command execution safety/limits | `server/.../exec/ICommandRunner.java` or `ProcessICommandRunner.java` | `server/src/test/java/com/ricky/thyme/exec/ProcessCommandRunnerTest.java` |
 | Change dependencies, JPMS names, or linked modules | Root `pom.xml`, module `pom.xml` files, and `module-info.java`; update the JNA Platform descriptor if that dependency changes | `./mvnw clean verify` with a full JDK; inspect the linked runtime's module list |
 | Change deployment/install behavior | `deploy.sh`, `bin/thyme`, and `config.properties.example` | Shell syntax check and a deployment dry run against a test host |
 | Change the container image or Compose behavior | `Dockerfile`, `docker-compose.yml`, and `.dockerignore` | Build the image and inspect the resulting command/mounts |

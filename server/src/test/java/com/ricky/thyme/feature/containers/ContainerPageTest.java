@@ -9,14 +9,15 @@ import com.googlecode.lanterna.input.MouseActionType;
 import com.googlecode.lanterna.screen.Screen;
 import com.googlecode.lanterna.screen.TerminalScreen;
 import com.googlecode.lanterna.terminal.virtual.DefaultVirtualTerminal;
-import com.ricky.thyme.exec.CommandRunner;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -37,8 +38,52 @@ class ContainerPageTest {
     private static final String RUNNING_ID = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     private static final String STOPPED_ID = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
-    private static CommandRunner.Result ok(String stdout) {
-        return new CommandRunner.Result(0, stdout, "");
+    @FunctionalInterface
+    private interface ContainerAction {
+        void run(String action, String id) throws IOException, InterruptedException;
+    }
+
+    private record StubProvider(
+            Callable<List<ContainerSnapshot>> lister,
+            Function<String, String> logger,
+            ContainerAction actor) implements IContainerProvider {
+
+        static StubProvider noop() {
+            return new StubProvider(List::of, id -> "", (action, id) -> {
+                // no-op
+            });
+        }
+
+        @Override
+        public List<ContainerSnapshot> list() throws IOException, InterruptedException {
+            try {
+                return lister.call();
+            } catch (IOException | InterruptedException | RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new IOException(e);
+            }
+        }
+
+        @Override
+        public String logs(String id) {
+            return logger.apply(id);
+        }
+
+        @Override
+        public void start(String id) throws IOException, InterruptedException {
+            actor.run("start", id);
+        }
+
+        @Override
+        public void stop(String id) throws IOException, InterruptedException {
+            actor.run("stop", id);
+        }
+
+        @Override
+        public void restart(String id) throws IOException, InterruptedException {
+            actor.run("restart", id);
+        }
     }
 
     @Test
@@ -52,7 +97,7 @@ class ContainerPageTest {
                         "0%", "0B / 0B", "0B / 0B", "0")
         );
 
-        ContainerProvider dummyProvider = new ContainerProvider((cmd, timeout) -> ok(""));
+        IContainerProvider dummyProvider = StubProvider.noop();
         ContainerPage page = new ContainerPage(dummyProvider);
         injectContainers(page, sampleList);
 
@@ -86,11 +131,8 @@ class ContainerPageTest {
                           2026-11-22T10:00:02Z Ready for connections.
                           """;
 
-        ContainerProvider dummyProvider = new ContainerProvider((cmd, timeout) -> {
-            if ("logs".equals(cmd.get(1))) {
-                return ok(mockLogs);
-            }
-            return ok("");
+        IContainerProvider dummyProvider = new StubProvider(List::of, id -> mockLogs, (action, id) -> {
+            // no-op
         });
         ContainerPage page = new ContainerPage(dummyProvider);
         page.onShow(Runnable::run);
@@ -156,10 +198,8 @@ class ContainerPageTest {
                         "0%", "0B / 0B", "0B / 0B", "0")
         );
         List<List<String>> executed = new ArrayList<>();
-        ContainerProvider provider = new ContainerProvider((cmd, timeout) -> {
-            executed.add(cmd);
-            return ok("");
-        });
+        IContainerProvider provider = new StubProvider(List::of, id -> "",
+                (action, id) -> executed.add(List.of(action, id)));
         ContainerPage page = new ContainerPage(provider);
         page.onShow(Runnable::run);
         injectContainers(page, sampleList);
@@ -193,7 +233,7 @@ class ContainerPageTest {
                         "1.0%", "1kB / 1kB", "0B / 0B", "1")
         );
 
-        ContainerProvider dummyProvider = new ContainerProvider((cmd, timeout) -> ok(""));
+        IContainerProvider dummyProvider = StubProvider.noop();
         ContainerPage page = new ContainerPage(dummyProvider);
         injectContainers(page, sampleList);
 
@@ -268,7 +308,7 @@ class ContainerPageTest {
 
     @Test
     void navigatesTheCardGridInTwoDimensions() throws IOException {
-        ContainerPage page = new ContainerPage(new ContainerProvider((cmd, timeout) -> ok("")));
+        ContainerPage page = new ContainerPage(StubProvider.noop());
         injectContainers(page, many(7));
         TerminalSize size = new TerminalSize(120, 35);
         writeSnapshot("containers-grid", size, page);
@@ -295,7 +335,7 @@ class ContainerPageTest {
 
     @Test
     void scrollsTheGridToKeepTheSelectionVisible() throws IOException {
-        ContainerPage page = new ContainerPage(new ContainerProvider((cmd, timeout) -> ok("")));
+        ContainerPage page = new ContainerPage(StubProvider.noop());
         injectContainers(page, many(40));
         TerminalSize size = new TerminalSize(80, 24);
         writeSnapshot("containers-scroll", size, page);
@@ -312,7 +352,7 @@ class ContainerPageTest {
 
     @Test
     void mouseClickOpensACardAndClickingOutsideOrOnTheBorderClosesIt() throws IOException {
-        ContainerPage page = new ContainerPage(new ContainerProvider((cmd, timeout) -> ok("")));
+        ContainerPage page = new ContainerPage(StubProvider.noop());
         page.onShow(Runnable::run);
         injectContainers(page, many(3));
         TerminalSize size = new TerminalSize(120, 35);
@@ -360,24 +400,8 @@ class ContainerPageTest {
                         null, "1%", "1MiB", "1%", "0B", "0B", "1"),
                 new ContainerSnapshot(id(1), "mystery", "acme/mystery", "running", "Up", "1h", 0,
                         null, "1%", "1MiB", "1%", "0B", "0B", "1")));
-        ContainerProvider provider = new ContainerProvider((cmd, timeout) -> switch (cmd.get(1)) {
-            case "ps" -> {
-                StringBuilder out = new StringBuilder();
-                for (ContainerSnapshot c : docker.get()) {
-                    out.append("{\"ID\":\"").append(c.id()).append("\",\"Names\":\"").append(c.name())
-                            .append("\",\"Image\":\"").append(c.image())
-                            .append("\",\"State\":\"running\",\"Status\":\"Up\",\"RunningFor\":\"1h\"}\n");
-                }
-                yield ok(out.toString());
-            }
-            case "inspect" -> {
-                StringBuilder out = new StringBuilder();
-                for (ContainerSnapshot c : docker.get()) {
-                    out.append(c.id()).append("|0|0\n");
-                }
-                yield ok(out.toString());
-            }
-            default -> ok("");
+        IContainerProvider provider = new StubProvider(docker::get, id -> "", (action, id) -> {
+            // no-op
         });
         ContainerPage page = new ContainerPage(provider, cache);
         page.onShow(Runnable::run);

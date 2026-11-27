@@ -1,6 +1,6 @@
 package com.ricky.thyme.feature.disk;
 
-import com.ricky.thyme.exec.CommandRunner;
+import com.ricky.thyme.exec.ICommandRunner;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -15,14 +15,14 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
-public final class LinuxDiskProvider implements DiskProvider {
+public final class LinuxDiskProvider implements IDiskProvider {
     private static final long BYTES_PER_SECTOR = 512;
     private static final Pattern PSEUDO_DISK = Pattern.compile("^(loop|ram|zram)[0-9]*.*$");
     private final Path diskStatsPath;
     private final Path blockRoot;
     private final Path mountsPath;
     private final Path filesystemRoot;
-    private final CommandRunner commandRunner;
+    private final ICommandRunner commandRunner;
     private Map<String, Counters> previousCounters = Map.of();
     private final Map<String, List<String>> btrfsDevices = new HashMap<>();
     private final Map<String, Long> btrfsDeviceReadNanos = new HashMap<>();
@@ -37,10 +37,10 @@ public final class LinuxDiskProvider implements DiskProvider {
     }
 
     public LinuxDiskProvider(Path hostRoot, Path sysRoot) {
-        this(hostRoot, sysRoot, (CommandRunner) null);
+        this(hostRoot, sysRoot, (ICommandRunner) null);
     }
 
-    public LinuxDiskProvider(Path hostRoot, Path sysRoot, CommandRunner commandRunner) {
+    public LinuxDiskProvider(Path hostRoot, Path sysRoot, ICommandRunner commandRunner) {
         this(
                 hostRoot.resolve("proc/diskstats"),
                 sysRoot.resolve("block"),
@@ -61,7 +61,7 @@ public final class LinuxDiskProvider implements DiskProvider {
 
     LinuxDiskProvider(
             Path diskStatsPath, Path blockRoot, Path mountsPath,
-            Path filesystemRoot, CommandRunner commandRunner) {
+            Path filesystemRoot, ICommandRunner commandRunner) {
         this.diskStatsPath = diskStatsPath;
         this.blockRoot = blockRoot;
         this.mountsPath = mountsPath;

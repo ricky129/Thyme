@@ -9,16 +9,16 @@ import com.googlecode.lanterna.input.KeyType;
 import com.googlecode.lanterna.input.MouseAction;
 import com.ricky.thyme.feature.cpu.CpuSnapshot;
 import com.ricky.thyme.feature.cpu.OshiCpuProvider;
-import com.ricky.thyme.feature.disk.DiskProvider;
+import com.ricky.thyme.feature.disk.IDiskProvider;
 import com.ricky.thyme.feature.disk.DiskSnapshot;
-import com.ricky.thyme.feature.gpu.GpuProvider;
+import com.ricky.thyme.feature.gpu.IGpuProvider;
 import com.ricky.thyme.feature.gpu.GpuReading;
 import com.ricky.thyme.feature.gpu.GpuSnapshot;
-import com.ricky.thyme.feature.host.HostProvider;
+import com.ricky.thyme.feature.host.IHostProvider;
 import com.ricky.thyme.feature.host.HostSnapshot;
 import com.ricky.thyme.feature.memory.MemorySnapshot;
 import com.ricky.thyme.feature.memory.OshiMemoryProvider;
-import com.ricky.thyme.feature.network.NetworkProvider;
+import com.ricky.thyme.feature.network.INetworkProvider;
 import com.ricky.thyme.feature.network.NetworkSnapshot;
 import com.ricky.thyme.feature.services.ServiceProvider;
 import com.ricky.thyme.feature.services.ServiceSnapshot;
@@ -66,11 +66,11 @@ public final class DashboardPage extends Page {
 
     private final OshiCpuProvider cpuProvider;
     private final OshiMemoryProvider memoryProvider;
-    private final GpuProvider gpuProvider;
-    private final DiskProvider diskProvider;
+    private final IGpuProvider gpuProvider;
+    private final IDiskProvider diskProvider;
     private final ServiceProvider serviceProvider;
-    private final HostProvider hostProvider;
-    private final NetworkProvider networkProvider;
+    private final IHostProvider hostProvider;
+    private final INetworkProvider networkProvider;
     private final AtomicReference<DashboardSnapshot> snapshot = new AtomicReference<>();
     private final TimeSeriesBuffer cpuHistory = new TimeSeriesBuffer();
     private final TimeSeriesBuffer memoryHistory = new TimeSeriesBuffer();
@@ -117,10 +117,10 @@ public final class DashboardPage extends Page {
     public DashboardPage(
             OshiCpuProvider cpuProvider,
             OshiMemoryProvider memoryProvider,
-            GpuProvider gpuProvider,
-            DiskProvider diskProvider,
+            IGpuProvider gpuProvider,
+            IDiskProvider diskProvider,
             ServiceProvider serviceProvider,
-            HostProvider hostProvider) {
+            IHostProvider hostProvider) {
         this(cpuProvider, memoryProvider, gpuProvider, diskProvider, serviceProvider,
                 hostProvider, null);
     }
@@ -128,11 +128,11 @@ public final class DashboardPage extends Page {
     public DashboardPage(
             OshiCpuProvider cpuProvider,
             OshiMemoryProvider memoryProvider,
-            GpuProvider gpuProvider,
-            DiskProvider diskProvider,
+            IGpuProvider gpuProvider,
+            IDiskProvider diskProvider,
             ServiceProvider serviceProvider,
-            HostProvider hostProvider,
-            NetworkProvider networkProvider) {
+            IHostProvider hostProvider,
+            INetworkProvider networkProvider) {
         this.networkProvider = networkProvider;
         this.cpuProvider = cpuProvider;
         this.memoryProvider = memoryProvider;

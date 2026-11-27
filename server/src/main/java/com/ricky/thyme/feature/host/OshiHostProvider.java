@@ -6,7 +6,7 @@ import oshi.software.os.OperatingSystem;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** Reads hostname and uptime from OSHI; no extra command is executed. */
-public final class OshiHostProvider implements HostProvider {
+public final class OshiHostProvider implements IHostProvider {
     private final SystemInfo systemInfo = new SystemInfo();
     private final AtomicReference<String> hostname = new AtomicReference<>();
 

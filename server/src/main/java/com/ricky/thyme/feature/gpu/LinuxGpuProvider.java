@@ -7,7 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-public final class LinuxGpuProvider implements GpuProvider {
+public final class LinuxGpuProvider implements IGpuProvider {
 
     private final SysfsGpuProvider sysfsProvider;
     private final NvidiaGpuProvider nvidiaProvider;

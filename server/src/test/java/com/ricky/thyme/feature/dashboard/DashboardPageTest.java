@@ -13,7 +13,7 @@ import com.googlecode.lanterna.input.MouseActionType;
 import com.googlecode.lanterna.screen.Screen;
 import com.googlecode.lanterna.screen.TerminalScreen;
 import com.googlecode.lanterna.terminal.virtual.DefaultVirtualTerminal;
-import com.ricky.thyme.exec.CommandRunner;
+import com.ricky.thyme.exec.ICommandRunner;
 import com.ricky.thyme.feature.disk.DiskSnapshot;
 import com.ricky.thyme.feature.gpu.GpuReading;
 import com.ricky.thyme.feature.gpu.GpuSnapshot;
@@ -309,7 +309,7 @@ class DashboardPageTest {
 
     @Test
     void sampleServicesLogsOnlyFailuresAndRecoveries() {
-        AtomicReference<CommandRunner.Result> nextResult = new AtomicReference<>(new CommandRunner.Result(
+        AtomicReference<ICommandRunner.Result> nextResult = new AtomicReference<>(new ICommandRunner.Result(
                 0,
                 """
                 [
@@ -324,7 +324,7 @@ class DashboardPageTest {
         page.sampleServices();
         assertEquals(0, page.eventLog().size());
 
-        nextResult.set(new CommandRunner.Result(
+        nextResult.set(new ICommandRunner.Result(
                 0,
                 """
                 [
@@ -338,7 +338,7 @@ class DashboardPageTest {
         assertEquals(EventLogBuffer.Severity.CRITICAL, page.eventLog().snapshot().get(0).severity());
         assertEquals("Service nginx.service failed", page.eventLog().snapshot().get(0).message());
 
-        nextResult.set(new CommandRunner.Result(
+        nextResult.set(new ICommandRunner.Result(
                 0,
                 """
                 [{"unit":"nginx.service","load":"loaded","active":"active","sub":"running","description":"Web"}]
@@ -349,7 +349,7 @@ class DashboardPageTest {
         assertEquals(EventLogBuffer.Severity.GOOD, page.eventLog().snapshot().get(1).severity());
         assertEquals("Service nginx.service recovered", page.eventLog().snapshot().get(1).message());
 
-        nextResult.set(new CommandRunner.Result(
+        nextResult.set(new ICommandRunner.Result(
                 0,
                 """
                 [{"unit":"foo.service","load":"loaded","active":"failed","sub":"failed","description":"Foo"}]
@@ -360,7 +360,7 @@ class DashboardPageTest {
         assertEquals(EventLogBuffer.Severity.CRITICAL, page.eventLog().snapshot().get(2).severity());
         assertEquals("Service foo.service failed", page.eventLog().snapshot().get(2).message());
 
-        nextResult.set(new CommandRunner.Result(0, "[]", ""));
+        nextResult.set(new ICommandRunner.Result(0, "[]", ""));
         page.sampleServices();
         assertEquals(4, page.eventLog().size());
         assertEquals(EventLogBuffer.Severity.GOOD, page.eventLog().snapshot().get(3).severity());
@@ -369,8 +369,8 @@ class DashboardPageTest {
 
     @Test
     void sampleServicesLogsProviderErrorAndRecovery() {
-        AtomicReference<CommandRunner.Result> nextResult = new AtomicReference<>(
-                new CommandRunner.Result(1, "", "systemctl failed"));
+        AtomicReference<ICommandRunner.Result> nextResult = new AtomicReference<>(
+                new ICommandRunner.Result(1, "", "systemctl failed"));
         DashboardPage page = new DashboardPage(null, null, null, null,
                 new ServiceProvider((command, timeout) -> nextResult.get()), null);
 
@@ -380,7 +380,7 @@ class DashboardPageTest {
         assertEquals("Services provider error: systemctl: systemctl failed",
                 page.eventLog().snapshot().get(0).message());
 
-        nextResult.set(new CommandRunner.Result(0, "[]", ""));
+        nextResult.set(new ICommandRunner.Result(0, "[]", ""));
         page.sampleServices();
         assertEquals(2, page.eventLog().size());
         assertEquals(EventLogBuffer.Severity.GOOD, page.eventLog().snapshot().get(1).severity());

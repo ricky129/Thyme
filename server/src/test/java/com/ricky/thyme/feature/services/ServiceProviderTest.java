@@ -1,6 +1,6 @@
 package com.ricky.thyme.feature.services;
 
-import com.ricky.thyme.exec.CommandRunner;
+import com.ricky.thyme.exec.ICommandRunner;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -14,9 +14,9 @@ class ServiceProviderTest {
     @Test
     void listsServicesReadOnlyAndParsesJson() throws Exception {
         var invoked = new AtomicReference<List<String>>();
-        CommandRunner runner = (command, timeout) -> {
+        ICommandRunner runner = (command, timeout) -> {
             invoked.set(command);
-            return new CommandRunner.Result(
+            return new ICommandRunner.Result(
                     0,
                     """
                     [{"unit":"nginx.service","load":"loaded","active":"active","sub":"running","description":"Web server"}]
@@ -36,16 +36,16 @@ class ServiceProviderTest {
 
     @Test
     void propagatesCommandErrors() {
-        CommandRunner runner = (command, timeout) ->
-                new CommandRunner.Result(5, "", "service not found");
+        ICommandRunner runner = (command, timeout) ->
+                new ICommandRunner.Result(5, "", "service not found");
 
         assertThrows(IOException.class, () -> new ServiceProvider(runner).list());
     }
 
     @Test
     void rejectsMalformedServiceRecords() {
-        CommandRunner runner = (command, timeout) ->
-                new CommandRunner.Result(0, "[{\"unit\":\"nginx.service\"}]", "");
+        ICommandRunner runner = (command, timeout) ->
+                new ICommandRunner.Result(0, "[{\"unit\":\"nginx.service\"}]", "");
 
         assertThrows(IOException.class, () -> new ServiceProvider(runner).list());
     }
